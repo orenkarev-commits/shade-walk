@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Shade Walk · Rothschild</title>
+<script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
 <style>
@@ -11,416 +12,476 @@
   body { height: 100vh; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   #map { position: fixed; inset: 0; }
 
-  #controls {
-    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-    z-index: 100;
-    background: rgba(255,255,255,0.95);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(0,0,0,0.12);
-    border-radius: 99px;
+  /* ── TOP BAR ── */
+  #top {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    z-index: 200;
+    display: flex; align-items: center; gap: 10px; white-space: nowrap;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid rgba(0,0,0,0.12); border-radius: 99px;
     padding: 8px 10px 8px 18px;
-    display: flex; align-items: center; gap: 10px;
-    white-space: nowrap;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.14);
   }
-  #app-name { font-size: 13px; font-weight: 700; color: #111; letter-spacing: -0.3px; }
-  #tsl { width: 160px; accent-color: #15803d; cursor: pointer; height: 4px; }
+  #app-name { font-size: 13px; font-weight: 700; color: #111; }
+  #tsl { width: 150px; accent-color: #15803d; cursor: pointer; }
   #tval { font-size: 13px; font-weight: 600; color: #111; min-width: 64px; }
   .sb {
-    font-size: 11px; padding: 5px 11px; border-radius: 99px;
+    font-size: 11px; padding: 5px 10px; border-radius: 99px;
     border: 1px solid rgba(0,0,0,0.15); background: transparent;
     cursor: pointer; color: #555; font-weight: 500; transition: all .15s;
   }
   .sb.on { background: #111; color: #fff; border-color: #111; }
 
-  #info {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    z-index: 100;
-    background: rgba(255,255,255,0.95);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(0,0,0,0.12);
-    border-radius: 16px;
-    padding: 14px 18px;
-    min-width: 300px; max-width: 460px;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  /* ── SUN CARD (top-right) ── */
+  #sun-card {
+    position: fixed; top: 70px; right: 14px; z-index: 200;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid rgba(0,0,0,0.10); border-radius: 12px;
+    padding: 10px 14px; font-size: 12px; color: #555; line-height: 1.7;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
   }
-  #sun-line { font-size: 12px; color: #666; margin-bottom: 6px; }
-  #tip-line { font-size: 13px; color: #222; line-height: 1.5; }
-  #tip-line strong { color: #15803d; }
+  #sun-card strong { color: #111; font-size: 14px; font-weight: 700; display: block; }
+
+  /* ── EDIT POPUP ── */
+  #edit-panel {
+    position: fixed; z-index: 300; display: none;
+    background: #fff; border: 1px solid rgba(0,0,0,0.14); border-radius: 12px;
+    padding: 14px 16px; min-width: 220px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  }
+  #edit-panel h4 { font-size: 12px; font-weight: 700; color: #111; margin-bottom: 10px; }
+  .edit-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; color: #555; }
+  .edit-row input[type=range] { flex: 1; accent-color: #15803d; }
+  .edit-row span { min-width: 44px; font-weight: 600; color: #111; text-align: right; }
+  #edit-close {
+    font-size: 11px; color: #999; cursor: pointer; margin-top: 6px;
+    text-align: right; display: block;
+  }
+  #edit-close:hover { color: #111; }
+
+  /* ── HELP ── */
+  #help {
+    position: fixed; bottom: 54px; left: 14px; z-index: 200;
+    font-size: 11px; color: rgba(0,0,0,0.4);
+  }
 </style>
 </head>
 <body>
 <div id="map"></div>
 
-<div id="controls">
+<div id="top">
   <span id="app-name">🌿 Shade Walk · Rothschild</span>
   <input type="range" id="tsl" min="6" max="19" step="0.5" value="9">
   <span id="tval">9:00 am</span>
   <button class="sb on" data-s="summer">Summer</button>
-  <button class="sb" data-s="spring">Spring</button>
-  <button class="sb" data-s="autumn">Autumn</button>
-  <button class="sb" data-s="winter">Winter</button>
+  <button class="sb"    data-s="spring">Spring</button>
+  <button class="sb"    data-s="autumn">Autumn</button>
+  <button class="sb"    data-s="winter">Winter</button>
 </div>
 
-<div id="info">
-  <div id="sun-line">–</div>
-  <div id="tip-line">–</div>
+<div id="sun-card">
+  <strong id="sc-time">–</strong>
+  <span id="sc-detail">–</span>
 </div>
+
+<div id="edit-panel">
+  <h4 id="ep-title">–</h4>
+  <div class="edit-row" id="ep-floors-row">
+    <label>Floors</label>
+    <input type="range" id="ep-floors" min="1" max="15" step="1" value="4">
+    <span id="ep-floors-val">4 fl · 16m</span>
+  </div>
+  <div class="edit-row" id="ep-tree-row">
+    <label>Tree height</label>
+    <input type="range" id="ep-tree" min="4" max="20" step="1" value="12">
+    <span id="ep-tree-val">12 m</span>
+  </div>
+  <span id="edit-close">✕ close</span>
+</div>
+
+<div id="help">Click any building or tree section to edit height</div>
 
 <script>
-/* ═══════════════════════════════════════════
-   ROTHSCHILD CENTRELINE — OSM way 154741757
-   Verified nodes, Habima (NE) → Neve Tzedek (SW)
-   ═══════════════════════════════════════════ */
-const CENTRELINE = [
-  [32.06820, 34.77793],
-  [32.06817, 34.77792],
-  [32.06672, 34.77746],
-  [32.06667, 34.77745],
-  [32.06662, 34.77743],
-  [32.06593, 34.77720],
-  [32.06547, 34.77671],
-  [32.06543, 34.77667],
-  [32.06438, 34.77557],
-  [32.06350, 34.77483],
-  [32.06250, 34.77400],
-  [32.06150, 34.77320],
-  [32.06050, 34.77240],
-  [32.05950, 34.77170],
-  [32.05860, 34.77110],
-  [32.05770, 34.77050],
-  [32.05660, 34.76990],
-  [32.05560, 34.76940],
-  [32.05490, 34.76910],
+/* ═══════════════════════════════════════════════════
+   ROTHSCHILD CENTRELINE — verified OSM nodes
+   Way 154741757, Habima (NE) → Neve Tzedek (SW)
+   No live Overpass fetch — these coords are correct.
+   ═══════════════════════════════════════════════════ */
+const CL = [
+  [32.06820, 34.77793],  // 0  Habima
+  [32.06817, 34.77792],  // 1
+  [32.06672, 34.77746],  // 2  Allenby / King George
+  [32.06667, 34.77745],  // 3  Gruzenberg
+  [32.06662, 34.77743],  // 4
+  [32.06593, 34.77720],  // 5  Balfour
+  [32.06547, 34.77671],  // 6  Shenkin
+  [32.06543, 34.77667],  // 7
+  [32.06438, 34.77557],  // 8  Brenner
+  [32.06350, 34.77483],  // 9  Herzl
+  [32.06250, 34.77400],  // 10
+  [32.06150, 34.77320],  // 11 Ahad Ha'am
+  [32.06050, 34.77240],  // 12
+  [32.05950, 34.77170],  // 13 Shadal
+  [32.05860, 34.77110],  // 14
+  [32.05770, 34.77050],  // 15 Florentin
+  [32.05660, 34.76990],  // 16
+  [32.05560, 34.76940],  // 17
+  [32.05490, 34.76910],  // 18 Neve Tzedek
 ];
 
-/* Per-node perpendicular offset — follows the road's actual bearing at each
-   node so curves are handled correctly. +PI/2 gives the NW (left-map) side. */
-function offsetPolyline(nodes, metres) {
-  const MPD = 111320;
+const MPD = 111320;
+const LAT = 32.07;
+const COS_LAT = Math.cos(LAT * Math.PI / 180);
+
+/* Offset a polyline perpendicular by `metres`.
+   Positive = NW side (left walkway). Negative = SE side. */
+function offsetPoly(nodes, metres) {
   return nodes.map((n, i) => {
     const p = nodes[Math.max(0, i - 1)];
     const q = nodes[Math.min(nodes.length - 1, i + 1)];
     const dLat = q[0] - p[0];
-    const dLon = (q[1] - p[1]) * Math.cos(n[0] * Math.PI / 180);
-    const bearing = Math.atan2(dLon, dLat);
-    const perp = bearing + Math.PI / 2;
+    const dLon = (q[1] - p[1]) * COS_LAT;
+    const brg = Math.atan2(dLon, dLat);
+    const perp = brg + Math.PI / 2; // +PI/2 → NW side
     return [
       n[0] + Math.cos(perp) * metres / MPD,
-      n[1] + Math.sin(perp) * metres / (MPD * Math.cos(n[0] * Math.PI / 180))
+      n[1] + Math.sin(perp) * metres / (MPD * COS_LAT)
     ];
   });
 }
 
-// Walk path: 8 m offset to the NW walkway. MapLibre coords are [lon, lat].
-let walkNodes = offsetPolyline(CENTRELINE, 8);
-const toLngLat = pts => pts.map(p => [p[1], p[0]]);
+/* Convert [lat,lon] array → [lon,lat] for MapLibre */
+const ll = pts => pts.map(p => [p[1], p[0]]);
 
-/* Tree segment polygons — buffered rectangles along the walkway */
-const TREE_SEGS = [
-  [0,  2,  'trimmed', 12],
-  [2,  4,  'dense',   12],
-  [4,  6,  'dense',   12],
-  [6,  8,  'sparse',   9],
-  [8,  10, 'dense',   12],
-  [10, 12, 'dense',   12],
-  [12, 14, 'medium',  12],
-  [14, 16, 'medium',  12],
-  [16, 18, 'sparse',  12],
+/* ═══════════════════════════════════════════════════
+   SECTIONS between cross-streets
+   Each section = one editable building block per side
+         + one editable tree section in median
+   ═══════════════════════════════════════════════════ */
+const SECTIONS = [
+  { name: 'Habima – Allenby',         from: 0,  to: 2  },
+  { name: 'Allenby – Gruzenberg',     from: 2,  to: 3  },
+  { name: 'Gruzenberg – Balfour',     from: 3,  to: 5  },
+  { name: 'Balfour – Shenkin',        from: 5,  to: 6  },
+  { name: 'Shenkin – Brenner',        from: 6,  to: 8  },
+  { name: 'Brenner – Herzl',          from: 8,  to: 9  },
+  { name: 'Herzl – Ahad Ha\'am',      from: 9,  to: 11 },
+  { name: "Ahad Ha'am – Shadal",      from: 11, to: 13 },
+  { name: 'Shadal – Florentin',       from: 13, to: 15 },
+  { name: 'Florentin – Neve Tzedek',  from: 15, to: 18 },
 ];
 
-/* ═══════════════════════════════════════════
-   SUN MATH — Tel Aviv 32.07°N
-   ═══════════════════════════════════════════ */
+// Mutable state: floors per building (left/right) and tree heights per section
+const bFloors = { left: [4,4,4,4,4,4,4,4,4,3], right: [4,4,4,4,4,4,4,4,4,3] };
+const treeH   = [12, 12, 12, 9, 12, 12, 12, 12, 12, 12]; // metres, section 3 = sparse 9m
+
+/* ═══════════════════════════════════════════════════
+   GEOMETRY BUILDERS
+   ═══════════════════════════════════════════════════ */
+
+/* Ring for a building block along `pts` between inner and outer offsets */
+function blockRing(pts, innerM, outerM) {
+  const inner = ll(offsetPoly(pts, innerM));
+  const outer = ll(offsetPoly(pts, outerM));
+  return [...inner, ...outer.slice().reverse(), inner[0]];
+}
+
+/* Build the full buildings GeoJSON */
+function buildingsGJ() {
+  const features = [];
+  SECTIONS.forEach((sec, i) => {
+    const pts = CL.slice(sec.from, sec.to + 1);
+    if (pts.length < 2) return;
+    // NW side: 13 – 28m from centreline
+    features.push({
+      type: 'Feature',
+      id: `BL${i}`,
+      properties: { type: 'building', side: 'left',  idx: i, height: bFloors.left[i]  * 4, name: sec.name + ' (NW)' },
+      geometry: { type: 'Polygon', coordinates: [blockRing(pts,  13,  28)] }
+    });
+    // SE side: same offset in opposite direction
+    features.push({
+      type: 'Feature',
+      id: `BR${i}`,
+      properties: { type: 'building', side: 'right', idx: i, height: bFloors.right[i] * 4, name: sec.name + ' (SE)' },
+      geometry: { type: 'Polygon', coordinates: [blockRing(pts, -13, -28)] }
+    });
+  });
+  return { type: 'FeatureCollection', features };
+}
+
+/* Build tree median GeoJSON — 5m band either side of centreline */
+function treesGJ() {
+  const features = [];
+  SECTIONS.forEach((sec, i) => {
+    const pts = CL.slice(sec.from, sec.to + 1);
+    if (pts.length < 2) return;
+    features.push({
+      type: 'Feature',
+      id: `T${i}`,
+      properties: { type: 'tree', idx: i, height: treeH[i], name: sec.name + ' (trees)' },
+      geometry: { type: 'Polygon', coordinates: [blockRing(pts, -4.5, 4.5)] }
+    });
+  });
+  return { type: 'FeatureCollection', features };
+}
+
+/* Walk path — 8m NW offset of centreline */
+function walkGJ() {
+  return { type: 'Feature', geometry: { type: 'LineString', coordinates: ll(offsetPoly(CL, 8)) } };
+}
+
+/* ═══════════════════════════════════════════════════
+   SUN — SunCalc.js for accurate Tel Aviv position
+   ═══════════════════════════════════════════════════ */
+const SEASON_DATE = {
+  summer: [2025, 6, 1, 3],   // July 1, UTC+3 (IDT)
+  spring: [2025, 2, 21, 2],  // Mar 21, UTC+2 (IST)
+  autumn: [2025, 8, 21, 3],  // Sep 21, UTC+3
+  winter: [2025, 11, 21, 2], // Dec 21, UTC+2
+};
 const DIR16 = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
 
-function getSun(h, s) {
-  const decl = { summer: 23.5, spring: 10, autumn: 5, winter: -23.5 }[s] * Math.PI / 180;
-  const lat  = 32.07 * Math.PI / 180;
-  const ha   = (h - 12) * 15 * Math.PI / 180;
-  const sinA = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(ha);
-  const altR = Math.asin(Math.max(-0.15, sinA));
-  const altD = altR * 180 / Math.PI;
-  const cosZ = (Math.sin(decl) - Math.sin(lat) * sinA) / (Math.cos(lat) * Math.cos(altR));
-  let az = Math.acos(Math.max(-1, Math.min(1, cosZ))) * 180 / Math.PI;
-  if (h > 12) az = 360 - az;
+function getSun(hour, season) {
+  const [y, m, d, tz] = SEASON_DATE[season];
+  const hh = Math.floor(hour), mm = hour % 1 === 0.5 ? 30 : 0;
+  const date = new Date(Date.UTC(y, m, d, hh - tz, mm));
+  const pos  = SunCalc.getPosition(date, 32.0639, 34.7717);
+  const alt  = pos.altitude * 180 / Math.PI;
+  const az   = (pos.azimuth  * 180 / Math.PI + 180 + 360) % 360;
   return {
-    alt: Math.round(altD * 10) / 10,
+    alt: Math.round(alt * 10) / 10,
     az:  Math.round(az),
-    up:  altD > 0,
+    up:  alt > 0.5,
     dir: DIR16[Math.round(az / 22.5) % 16]
   };
 }
 
 const fmtH = h => {
   const hh = Math.floor(h), mm = h % 1 === 0.5 ? '30' : '00';
-  const ap = hh < 12 ? 'am' : 'pm';
-  const d  = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+  const ap = hh < 12 ? 'am' : 'pm', d = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
   return `${d}:${mm} ${ap}`;
 };
 
-/* ═══════════════════════════════════════════
-   MAP — MapLibre GL JS v4, light street tiles
-   ═══════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   SHADOW POLYGONS — computed from sun position
+   For each polygon, project each vertex in the shadow
+   direction by (height / tan(altitude)).
+   ═══════════════════════════════════════════════════ */
+function computeShadows(gj, sun) {
+  if (!sun.up) return { type: 'FeatureCollection', features: [] };
+  const az    = sun.az * Math.PI / 180;
+  const tanA  = Math.tan(sun.alt * Math.PI / 180);
+  const features = gj.features.map(f => {
+    const h   = f.properties.height;
+    const len = h / tanA; // shadow length in metres
+    const dLon = -Math.sin(az) * len / (MPD * COS_LAT);
+    const dLat = -Math.cos(az) * len / MPD;
+    const ring = f.geometry.coordinates[0];
+    const shifted = ring.map(([lo, la]) => [lo + dLon, la + dLat]);
+    // Union of footprint + shifted footprint = shadow slab
+    const sRing = [...ring.slice(0, -1), ...shifted.slice(0, -1).reverse(), ring[0]];
+    return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [sRing] } };
+  });
+  return { type: 'FeatureCollection', features };
+}
+
+/* ═══════════════════════════════════════════════════
+   MAP INIT
+   ═══════════════════════════════════════════════════ */
 const map = new maplibregl.Map({
   container: 'map',
-  // OpenFreeMap "bright" — open-source, no token, includes buildings with heights
   style: 'https://tiles.openfreemap.org/styles/bright',
   center: [34.7737, 32.0625],
   zoom: 16,
-  pitch: 55,
-  bearing: 20,
+  pitch: 50,
+  bearing: 15,
   antialias: true,
-  maxPitch: 75
+  maxPitch: 70
 });
-
 map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
 let hour = 9, season = 'summer';
 
-/* ═══════════════════════════════════════════
-   STYLE LOAD — add layers once tiles ready
-   ═══════════════════════════════════════════ */
 map.on('load', () => {
-  const style = map.getStyle();
-
-  // Find first symbol (label) layer to insert below it
-  const firstLabel = style.layers.find(l => l.type === 'symbol')?.id;
-
-  // Remove flat building fills that come with the style (we replace with 3D)
-  ['building', 'building-top', 'building_fill', 'buildings'].forEach(id => {
+  // Remove any flat building fill from the base style so we own the buildings
+  ['building', 'building-top', 'building_fill'].forEach(id => {
     if (map.getLayer(id)) map.removeLayer(id);
   });
+  const firstLabel = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
 
-  // Detect source name — OpenFreeMap uses 'openmaptiles'
-  const srcName = Object.keys(style.sources).find(k =>
-    k === 'openmaptiles' || k.includes('maptile') || k.includes('openmap')
-  ) || 'openmaptiles';
-
-  // 3D building extrusion — heights from OSM vector tiles
+  /* ── Shadow layer (rendered UNDER buildings) ── */
+  map.addSource('shadows', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   map.addLayer({
-    id: 'buildings-3d',
-    source: srcName,
-    'source-layer': 'building',
-    type: 'fill-extrusion',
-    paint: {
-      'fill-extrusion-color': '#d6cfc7',
-      'fill-extrusion-height': [
-        'coalesce',
-        ['to-number', ['get', 'render_height']],
-        ['to-number', ['get', 'height']],
-        12
-      ],
-      'fill-extrusion-base': [
-        'coalesce',
-        ['to-number', ['get', 'render_min_height']],
-        ['to-number', ['get', 'min_height']],
-        0
-      ],
-      'fill-extrusion-opacity': 0.92,
-      'fill-extrusion-ambient-occlusion-intensity': 0.4,
-      'fill-extrusion-ambient-occlusion-radius': 3
-    }
+    id: 'shadows', type: 'fill', source: 'shadows',
+    paint: { 'fill-color': '#1a1200', 'fill-opacity': 0.30 }
   }, firstLabel);
 
-  // Tree extrusions — dark green cylinders along the walkway
-  map.addSource('trees', { type: 'geojson', data: buildTreeGeoJSON() });
+  /* ── Tree extrusions ── */
+  map.addSource('trees', { type: 'geojson', data: treesGJ() });
   map.addLayer({
-    id: 'trees-3d',
-    type: 'fill-extrusion',
-    source: 'trees',
+    id: 'trees-3d', type: 'fill-extrusion', source: 'trees',
     paint: {
-      'fill-extrusion-color': '#166534',
-      'fill-extrusion-height': ['get', 'h'],
+      'fill-extrusion-color': '#2d6a1f',
+      'fill-extrusion-height': ['get', 'height'],
       'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.75
+      'fill-extrusion-opacity': 0.85
     }
   }, firstLabel);
 
-  // Route: white halo + coloured line
-  map.addSource('route', { type: 'geojson', data: routeGeoJSON() });
+  /* ── Building extrusions ── */
+  map.addSource('buildings', { type: 'geojson', data: buildingsGJ() });
   map.addLayer({
-    id: 'route-halo',
-    type: 'line', source: 'route',
-    paint: { 'line-color': '#ffffff', 'line-width': 14, 'line-opacity': 0.7 }
-  });
-  map.addLayer({
-    id: 'route-line',
-    type: 'line', source: 'route',
-    paint: { 'line-color': '#15803d', 'line-width': 8, 'line-opacity': 0.95,
-             'line-cap': 'round', 'line-join': 'round' }
-  });
+    id: 'buildings-3d', type: 'fill-extrusion', source: 'buildings',
+    paint: {
+      'fill-extrusion-color': '#e8e0d4',
+      'fill-extrusion-height': ['get', 'height'],
+      'fill-extrusion-base': 0,
+      'fill-extrusion-opacity': 0.95,
+      'fill-extrusion-ambient-occlusion-intensity': 0.35,
+      'fill-extrusion-ambient-occlusion-radius': 2
+    }
+  }, firstLabel);
 
-  // Start / end labels
-  addLabel(toLngLat(walkNodes)[0], 'Habima ↓', '#15803d');
-  addLabel(toLngLat(walkNodes)[walkNodes.length - 1], 'Neve Tzedek', '#555');
+  /* ── Walkway line ── */
+  map.addSource('walk', { type: 'geojson', data: walkGJ() });
+  map.addLayer({ id: 'walk-halo', type: 'line', source: 'walk',
+    paint: { 'line-color': '#fff', 'line-width': 12, 'line-opacity': 0.7 } });
+  map.addLayer({ id: 'walk-line', type: 'line', source: 'walk',
+    paint: { 'line-color': '#15803d', 'line-width': 7, 'line-opacity': 1,
+             'line-cap': 'round', 'line-join': 'round' } });
+
+  /* ── Terminal labels ── */
+  const walkCoords = ll(offsetPoly(CL, 8));
+  addPill(walkCoords[0], '▲ Habima', '#15803d');
+  addPill(walkCoords[walkCoords.length - 1], 'Neve Tzedek', '#666');
+
+  /* ── Click to edit ── */
+  map.on('click', 'buildings-3d', onFeatureClick);
+  map.on('click', 'trees-3d',     onFeatureClick);
+  map.on('mouseenter', 'buildings-3d', () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'buildings-3d', () => map.getCanvas().style.cursor = '');
+  map.on('mouseenter', 'trees-3d',     () => map.getCanvas().style.cursor = 'pointer');
+  map.on('mouseleave', 'trees-3d',     () => map.getCanvas().style.cursor = '');
 
   updateAll();
-
-  // Try to fetch real centreline from Overpass (replaces hardcoded if successful)
-  fetchCentreline();
 });
 
-/* ═══════════════════════════════════════════
-   GEOJSON BUILDERS
-   ═══════════════════════════════════════════ */
-function routeGeoJSON() {
-  return {
-    type: 'Feature',
-    geometry: { type: 'LineString', coordinates: toLngLat(walkNodes) }
-  };
-}
-
-/* Build small hexagonal "tree" polygons at each node of each tree segment */
-function buildTreeGeoJSON() {
-  const features = [];
-  const r = 0.000025; // ~2.8m radius in degrees lat
-  const MPD = 111320;
-
-  TREE_SEGS.forEach(([si, ei, density, h]) => {
-    const opMap = { dense: 0.85, medium: 0.65, trimmed: 0.40, sparse: 0.28 };
-    const spacing = density === 'dense' ? 12 : density === 'medium' ? 16 : 22; // metres between trees
-    const pts = walkNodes.slice(si, ei + 1);
-
-    // Walk along the segment placing tree circles every `spacing` metres
-    let dist = 0;
-    for (let i = 0; i < pts.length - 1; i++) {
-      const a = pts[i], b = pts[i + 1];
-      const segLen = Math.sqrt(
-        Math.pow((b[0] - a[0]) * MPD, 2) +
-        Math.pow((b[1] - a[1]) * MPD * Math.cos(a[0] * Math.PI / 180), 2)
-      );
-      let d = spacing - dist;
-      while (d <= segLen) {
-        const t = d / segLen;
-        const lat = a[0] + t * (b[0] - a[0]);
-        const lon = a[1] + t * (b[1] - a[1]);
-        // Small hexagonal polygon for the tree canopy
-        const rLat = r;
-        const rLon = r / Math.cos(lat * Math.PI / 180);
-        const hex = Array.from({ length: 7 }, (_, k) => {
-          const ang = (k * Math.PI * 2) / 6;
-          return [lon + rLon * Math.cos(ang), lat + rLat * Math.sin(ang)];
-        });
-        features.push({
-          type: 'Feature',
-          properties: { h, density },
-          geometry: { type: 'Polygon', coordinates: [hex] }
-        });
-        d += spacing;
-      }
-      dist = segLen - (d - spacing);
-    }
-  });
-
-  return { type: 'FeatureCollection', features };
-}
-
-function addLabel(lngLat, text, color) {
-  const el = document.createElement('div');
-  el.style.cssText = `
-    background: ${color}; color: #fff;
-    font-size: 11px; font-weight: 700;
-    padding: 3px 9px; border-radius: 99px;
-    white-space: nowrap;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.25);
-  `;
-  el.textContent = text;
-  new maplibregl.Marker({ element: el, anchor: 'left' })
-    .setLngLat(lngLat)
-    .addTo(map);
-}
-
-/* ═══════════════════════════════════════════
-   UPDATE — sun position drives lighting
-   ═══════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   UPDATE — called on time/season change
+   ═══════════════════════════════════════════════════ */
 function updateAll() {
   const sun = getSun(hour, season);
 
-  // MapLibre GL JS v4 directional light = real shadow casting from buildings
+  // MapLibre v4 directional light — shadows from extrusions
   if (sun.up) {
     try {
       map.setLights([
-        { id: 'ambient', type: 'ambient',     properties: { color: '#ffffff', intensity: 0.3  } },
+        { id: 'ambient', type: 'ambient',     properties: { color: '#fff', intensity: 0.28 } },
         { id: 'sun',     type: 'directional', properties: {
-          color: '#fff8e7',
-          intensity: 0.95,
-          direction: [sun.az, 90 - sun.alt], // [azimuth from N, angle from zenith]
-          'cast-shadows': true,
-          'shadow-intensity': 0.85
+          color: '#fff9e0', intensity: 0.92,
+          direction: [sun.az, 90 - sun.alt],
+          'cast-shadows': true, 'shadow-intensity': 0.80
         }}
       ]);
-    } catch (_) {
-      // MapLibre < 4 — shadows unavailable, 3D still works
-    }
-  } else {
-    try {
-      map.setLights([
-        { id: 'ambient', type: 'ambient', properties: { color: '#8ab4d4', intensity: 0.5 } }
-      ]);
     } catch (_) {}
+  } else {
+    try { map.setLights([{ id: 'ambient', type: 'ambient', properties: { color: '#b0c4de', intensity: 0.5 } }]); } catch (_) {}
   }
 
-  // Info panel
-  document.getElementById('sun-line').textContent = sun.up
-    ? `☀ ${fmtH(hour)}  ·  ${sun.alt}° altitude  ·  from ${sun.dir} (${sun.az}°)`
-    : `🌙 ${fmtH(hour)}  ·  sun below horizon`;
+  // Ground shadow polygons
+  const bGJ = buildingsGJ();
+  const tGJ = treesGJ();
+  const shadowFeatures = [
+    ...computeShadows(bGJ, sun).features,
+    ...computeShadows(tGJ, sun).features
+  ];
+  if (map.getSource('shadows')) {
+    map.getSource('shadows').setData({ type: 'FeatureCollection', features: shadowFeatures });
+  }
 
-  const tip = hour < 9
-    ? '<strong>Before 9am:</strong> Long building shadows blanket the promenade — the best shade window of the day.'
-    : hour < 11
-    ? '<strong>9–11am:</strong> Tree canopy carries the shade. The Independence Hall and café sections are strongest.'
-    : hour < 15
-    ? '<strong>Midday–3pm:</strong> Shadows shrink. Walk fast through cross-street gaps — fully exposed there.'
-    : hour < 18
-    ? '<strong>After 3pm:</strong> Sun moves SW. Building shadows shift to the east pavement. Consider crossing sides.'
-    : '<strong>Evening:</strong> Both sides comfortable. Best time for a long walk.';
-  document.getElementById('tip-line').innerHTML = tip;
+  // Sun info card
+  document.getElementById('sc-time').textContent = '☀ ' + fmtH(hour);
+  document.getElementById('sc-detail').innerHTML = sun.up
+    ? `${sun.alt}° altitude · from ${sun.dir} (${sun.az}°)<br>Shadow len: ${sun.alt > 0.5 ? Math.round(1 / Math.tan(sun.alt * Math.PI / 180) * 16) + 'm (16m bldg)' : '—'}`
+    : 'Sun below horizon';
 }
 
-/* ═══════════════════════════════════════════
-   OVERPASS — fetch real centreline geometry
-   Falls back silently to hardcoded nodes
-   ═══════════════════════════════════════════ */
-async function fetchCentreline() {
-  const q = `[out:json][timeout:20];
-way["name"="שד' רוטשילד"]["highway"](32.053,34.769,32.074,34.782);
-out geom;`;
-  try {
-    const res = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q)
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    let nodes = [];
-    data.elements
-      .filter(e => e.type === 'way' && e.geometry?.length > 1)
-      .forEach(e => e.geometry.forEach(n => nodes.push([n.lat, n.lon])));
-    if (nodes.length < 4) return;
+/* ═══════════════════════════════════════════════════
+   CLICK → EDIT PANEL
+   ═══════════════════════════════════════════════════ */
+let editTarget = null; // { type, side, idx }
 
-    // Sort N→S and deduplicate within 2m
-    nodes.sort((a, b) => b[0] - a[0]);
-    const dedup = [nodes[0]];
-    for (let i = 1; i < nodes.length; i++) {
-      const p = dedup[dedup.length - 1];
-      const MPD = 111320, cosLat = Math.cos(p[0] * Math.PI / 180);
-      const d = Math.hypot((nodes[i][0] - p[0]) * MPD, (nodes[i][1] - p[1]) * MPD * cosLat);
-      if (d > 2) dedup.push(nodes[i]);
-    }
+function onFeatureClick(e) {
+  const feat = e.features[0];
+  const props = feat.properties;
+  const panel = document.getElementById('edit-panel');
 
-    walkNodes = offsetPolyline(dedup, 8);
-    map.getSource('route').setData(routeGeoJSON());
-    map.getSource('trees').setData(buildTreeGeoJSON());
-  } catch (_) {
-    // Silently keep hardcoded fallback
+  editTarget = props;
+
+  // Position panel near click point
+  const x = Math.min(e.point.x + 12, window.innerWidth  - 240);
+  const y = Math.min(e.point.y - 20, window.innerHeight - 160);
+  panel.style.left = x + 'px';
+  panel.style.top  = y + 'px';
+  panel.style.display = 'block';
+
+  document.getElementById('ep-title').textContent = props.name;
+
+  if (props.type === 'building') {
+    const floors = props.side === 'left' ? bFloors.left[props.idx] : bFloors.right[props.idx];
+    document.getElementById('ep-floors-row').style.display = 'flex';
+    document.getElementById('ep-tree-row').style.display   = 'none';
+    document.getElementById('ep-floors').value = floors;
+    document.getElementById('ep-floors-val').textContent = `${floors} fl · ${floors * 4}m`;
+  } else {
+    document.getElementById('ep-floors-row').style.display = 'none';
+    document.getElementById('ep-tree-row').style.display   = 'flex';
+    document.getElementById('ep-tree').value = treeH[props.idx];
+    document.getElementById('ep-tree-val').textContent = treeH[props.idx] + ' m';
   }
 }
 
-/* ═══════════════════════════════════════════
+document.getElementById('ep-floors').addEventListener('input', function () {
+  if (!editTarget || editTarget.type !== 'building') return;
+  const f = parseInt(this.value);
+  if (editTarget.side === 'left')  bFloors.left[editTarget.idx]  = f;
+  else                              bFloors.right[editTarget.idx] = f;
+  document.getElementById('ep-floors-val').textContent = `${f} fl · ${f * 4}m`;
+  if (map.getSource('buildings')) map.getSource('buildings').setData(buildingsGJ());
+  updateAll();
+});
+
+document.getElementById('ep-tree').addEventListener('input', function () {
+  if (!editTarget || editTarget.type !== 'tree') return;
+  const h = parseInt(this.value);
+  treeH[editTarget.idx] = h;
+  document.getElementById('ep-tree-val').textContent = h + ' m';
+  if (map.getSource('trees')) map.getSource('trees').setData(treesGJ());
+  updateAll();
+});
+
+document.getElementById('edit-close').addEventListener('click', () => {
+  document.getElementById('edit-panel').style.display = 'none';
+  editTarget = null;
+});
+
+/* ═══════════════════════════════════════════════════
+   HELPERS
+   ═══════════════════════════════════════════════════ */
+function addPill(lngLat, txt, bg) {
+  const el = Object.assign(document.createElement('div'), {
+    textContent: txt,
+    style: `background:${bg};color:#fff;font-size:11px;font-weight:700;
+            padding:3px 9px;border-radius:99px;white-space:nowrap;
+            box-shadow:0 2px 6px rgba(0,0,0,0.25);`
+  });
+  new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat(lngLat).addTo(map);
+}
+
+/* ═══════════════════════════════════════════════════
    CONTROLS
-   ═══════════════════════════════════════════ */
+   ═══════════════════════════════════════════════════ */
 document.getElementById('tsl').addEventListener('input', function () {
   hour = parseFloat(this.value);
   document.getElementById('tval').textContent = fmtH(hour);
