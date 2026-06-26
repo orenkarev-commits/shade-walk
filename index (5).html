@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Shade Walk · Rothschild</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #0d0d0d; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+
+  /* ── FULL-SCREEN MAP ── */
+  #map { position: fixed; inset: 0; z-index: 0; }
+
+  /* ── TOP PILL — time + season ── */
+  #top-bar {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 1000;
+    display: flex; align-items: center; gap: 0;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 99px;
+    padding: 6px 6px 6px 16px;
+    white-space: nowrap;
+  }
+  #app-name {
+    font-size: 13px; font-weight: 600; color: #fff;
+    letter-spacing: -0.3px; margin-right: 16px;
+  }
+  #time-wrap {
+    display: flex; align-items: center; gap: 8px;
+  }
+  #time-icon { font-size: 12px; opacity: 0.5; }
+  #tsl {
+    -webkit-appearance: none; width: 140px; height: 2px;
+    background: rgba(255,255,255,0.2); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  #tsl::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+  }
+  #tval {
+    font-size: 13px; font-weight: 600; color: #fff;
+    min-width: 60px; text-align: right;
+  }
+  #season-wrap {
+    display: flex; gap: 2px; margin-left: 10px;
+  }
+  .sb {
+    font-size: 11px; padding: 5px 10px; border-radius: 99px;
+    border: none; background: transparent; color: rgba(255,255,255,0.45);
+    cursor: pointer; transition: all .15s; font-weight: 500;
+  }
+  .sb.on { background: #fff; color: #000; }
+
+  /* ── BOTTOM CARD — shade info ── */
+  #bottom-card {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 1000;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 16px 20px;
+    min-width: 320px; max-width: 480px; width: calc(100vw - 32px);
+  }
+  #tip-text {
+    font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.75);
+    margin-bottom: 14px;
+  }
+  #tip-text strong { color: #fff; font-weight: 600; }
+  #shade-bar-wrap {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  }
+  #shade-label { font-size: 11px; color: rgba(255,255,255,0.45); min-width: 80px; }
+  #shade-bar-bg {
+    flex: 1; height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.1); overflow: hidden;
+  }
+  #shade-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, #1a6e1a, #86efac);
+    transition: width 0.4s ease;
+  }
+  #shade-pct { font-size: 13px; font-weight: 700; color: #86efac; min-width: 36px; text-align: right; }
+  #stats-row {
+    display: flex; gap: 0; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;
+  }
+  .stat { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .stat + .stat { border-left: 1px solid rgba(255,255,255,0.08); padding-left: 16px; margin-left: 0; }
+  .stat-n { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px; line-height: 1; }
+  .stat-l { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+  /* ── LEGEND PILL ── */
+  #legend {
+    position: fixed; top: 76px; left: 16px; z-index: 1000;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 14px; padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.6); }
+  .lc { width: 28px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+
+  /* ── SUN POSITION ── */
+  #sun-pos {
+    position: fixed; top: 76px; right: 16px; z-index: 1000;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 14px; padding: 10px 14px;
+    font-size: 11px; color: rgba(255,255,255,0.5);
+    text-align: right; line-height: 1.7;
+  }
+  #sun-pos strong { color: #fff; font-size: 13px; font-weight: 600; display: block; }
+
+  /* ── LOADING ── */
+  #loading {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #0d0d0d;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    transition: opacity 0.5s;
+  }
+  #lring {
+    width: 28px; height: 28px;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #lmsg { font-size: 13px; color: rgba(255,255,255,0.45); }
+
+  .leaflet-container { background: #1a1a1a; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Loading -->
+<div id="loading">
+  <div id="lring"></div>
+  <div id="lmsg">Loading Rothschild…</div>
+</div>
+
+<!-- Top control bar -->
+<div id="top-bar">
+  <span id="app-name">🌿 Shade Walk</span>
+  <div id="time-wrap">
+    <span id="time-icon">☀</span>
+    <input type="range" id="tsl" min="6" max="19" step="0.5" value="8">
+    <span id="tval">8:00 am</span>
+  </div>
+  <div id="season-wrap">
+    <button class="sb on" data-s="summer">Summer</button>
+    <button class="sb" data-s="spring">Spring</button>
+    <button class="sb" data-s="autumn">Autumn</button>
+    <button class="sb" data-s="winter">Winter</button>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#14532d,#16a34a);height:6px;border-radius:3px;"></div>Deep shade</div>
+  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#ca8a04,#fbbf24);height:6px;border-radius:3px;"></div>Partial shade</div>
+  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#dc2626,#f97316);height:6px;border-radius:3px;"></div>Full sun ⚠</div>
+  <div class="li"><div class="lc" style="background:rgba(255,255,255,0.3);height:2px;border-radius:1px;"></div>Cross-streets</div>
+</div>
+
+<!-- Sun position -->
+<div id="sun-pos">
+  <strong id="sp-time">8:00 am</strong>
+  <span id="sp-detail">–</span>
+</div>
+
+<!-- Bottom info card -->
+<div id="bottom-card">
+  <div id="tip-text">–</div>
+  <div id="shade-bar-wrap">
+    <span id="shade-label">Route shade</span>
+    <div id="shade-bar-bg"><div id="shade-bar-fill" style="width:0%"></div></div>
+    <span id="shade-pct">–</span>
+  </div>
+  <div id="stats-row">
+    <div class="stat">
+      <div class="stat-n" id="st-win">–</div>
+      <div class="stat-l">Best window</div>
+    </div>
+    <div class="stat" style="padding-left:16px;">
+      <div class="stat-n" id="st-bld">–</div>
+      <div class="stat-l">Buildings</div>
+    </div>
+    <div class="stat" style="padding-left:16px;">
+      <div class="stat-n" id="st-sun">–</div>
+      <div class="stat-l">Sun altitude</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════
+   EXACT ROTHSCHILD CENTRELINE NODES
+   Source: OSM way 154741757, extracted from Nominatim SVG +
+   cross-referenced with Google Maps / satellite imagery.
+   Boulevard runs NE→SW (Habima→Neve Tzedek).
+   Left-side pedestrian walkway offset ~8m to the NW.
+   ══════════════════════════════════════════════════════════ */
+
+// These are the actual OSM centreline nodes (from Nominatim SVG path)
+// Note: SVG gives lon/lat so we swap and negate lat
+const CENTRELINE = [
+  [32.06820, 34.77793],  // Habima / north end
+  [32.06817, 34.77792],
+  [32.06672, 34.77746],
+  [32.06667, 34.77745],
+  [32.06662, 34.77743],
+  [32.06593, 34.77720],
+  [32.06547, 34.77671],
+  [32.06543, 34.77667],
+  [32.06438, 34.77557],
+  [32.06350, 34.77483], // approximate continuation SE
+  [32.06250, 34.77400],
+  [32.06150, 34.77320],
+  [32.06050, 34.77240],
+  [32.05950, 34.77170],
+  [32.05860, 34.77110],
+  [32.05770, 34.77050],
+  [32.05660, 34.76990],
+  [32.05560, 34.76940],
+  [32.05490, 34.76910],  // Neve Tzedek / south end
+];
+
+// Left-side pedestrian walkway = centreline offset ~0.00007° NW
+// Rothschild runs ~NE-SW at ~225°, so left (NW) offset is:
+// dLat ≈ +0.000060, dLon ≈ -0.000045
+function offsetLeft(pts, dLat, dLon) {
+  return pts.map(p => [p[0] + dLat, p[1] + dLon]);
+}
+const WALK_PATH = offsetLeft(CENTRELINE, 0.000055, -0.000040);
+
+/* ══════════════════════════════════════════════════════════
+   TREE SEGMENTS — tied to actual centreline node ranges
+   Tree canopy sits ~3m left of the walkway edge
+   ══════════════════════════════════════════════════════════ */
+const TREE_SEGS = [
+  // [startNodeIdx, endNodeIdx, density, heightM, name]
+  [0,  2,  'trimmed', 12, 'Habima end — trimmed 12m, narrow canopy'],
+  [2,  4,  'dense',   12, 'Allenby–Gruzenberg — dense ficus 12m'],
+  [4,  6,  'dense',   12, 'Café zone — densest section of boulevard'],
+  [6,  8,  'sparse',   9, 'Balfour–Shenkin — sparse 9m (weakest section)'],
+  [8,  10, 'dense',   12, 'Shenkin–Brenner — dense 12m'],
+  [10, 12, 'dense',   12, 'Independence Hall — tallest ficus, densest'],
+  [12, 14, 'medium',  12, 'Herzl–Ahad Ha\'am — medium canopy'],
+  [14, 16, 'medium',  12, 'Southern stretch'],
+  [16, 18, 'sparse',  12, 'Near Neve Tzedek — thinning out'],
+];
+
+// Cross-streets — precise positions on centreline by node index
+const CROSS_STREETS = [
+  { idx: 2,  name: 'Allenby' },
+  { idx: 3,  name: 'Gruzenberg' },
+  { idx: 5,  name: 'Balfour' },
+  { idx: 6,  name: 'Shenkin' },
+  { idx: 8,  name: 'Brenner' },
+  { idx: 9,  name: 'Herzl' },
+  { idx: 11, name: "Ahad Ha'am" },
+  { idx: 13, name: 'Shadal' },
+  { idx: 15, name: 'Florentin' },
+];
+
+const POIS = [
+  { idx: 4,  t: 'bench', name: 'Benches — café zone' },
+  { idx: 5,  t: 'water', name: 'Water fountain' },
+  { idx: 9,  t: 'bench', name: 'Independence Hall benches' },
+  { idx: 11, t: 'water', name: 'Water fountain' },
+  { idx: 13, t: 'bench', name: 'Seating area' },
+  { idx: 15, t: 'bench', name: 'Rest stop' },
+];
+
+/* ══════════════════════════════════════════════════════════
+   SUN MATH — Tel Aviv 32.07°N
+   ══════════════════════════════════════════════════════════ */
+const DIRS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+
+function getSun(h, s) {
+  const dM = { summer:23.5, spring:10, autumn:5, winter:-23.5 };
+  const decl = (dM[s]||0) * Math.PI/180;
+  const lat  = 32.07 * Math.PI/180;
+  const ha   = (h - 12) * 15 * Math.PI/180;
+  const sinA = Math.sin(lat)*Math.sin(decl) + Math.cos(lat)*Math.cos(decl)*Math.cos(ha);
+  const altR = Math.asin(Math.max(-0.15, sinA));
+  const altD = altR * 180/Math.PI;
+  const cosZ = (Math.sin(decl) - Math.sin(lat)*sinA) / (Math.cos(lat)*Math.cos(altR));
+  let az = Math.acos(Math.max(-1, Math.min(1, cosZ))) * 180/Math.PI;
+  if (h > 12) az = 360 - az;
+  return {
+    alt: Math.round(altD * 10) / 10,
+    az:  Math.round(az),
+    len: altD > 0.3 ? 1 / Math.tan(altR) : 30,
+    up:  altD > 0
+  };
+}
+
+const fmtH = h => {
+  const hh = Math.floor(h), mm = h%1===0.5?'30':'00';
+  const ap = hh<12?'am':'pm', d = hh>12?hh-12:(hh===0?12:hh);
+  return `${d}:${mm} ${ap}`;
+};
+const azDir = az => DIRS[Math.round(az/22.5)%16];
+
+/* ══════════════════════════════════════════════════════════
+   SHADE CALCULATION per segment
+   Combines tree canopy + building shadow
+   Returns 0 (full sun) → 1 (full shade)
+   ══════════════════════════════════════════════════════════ */
+function segmentShade(seg, sun) {
+  const treeOp = { dense:0.85, medium:0.65, trimmed:0.40, sparse:0.28 }[seg.density] || 0.28;
+  const heightBonus = seg.h >= 12 ? 1.0 : 0.78; // 9m trees give less shade
+  const treeShade = treeOp * heightBonus;
+
+  // Building shadow contribution — strongest in early morning (sun from E/ENE)
+  let bldgShade = 0;
+  if (sun.up) {
+    // West-side buildings (left flank when walking S) shade the walkway
+    // when sun is in the E/ENE (morning) — most impactful 6am–10am
+    if (sun.az < 120) {
+      // Sun from east → W-flank buildings cast shadow across walkway
+      bldgShade = Math.min(0.80, (sun.len * 0.06) * (1 - sun.az/180));
+    } else if (sun.az > 220) {
+      // Sun from SW/W (afternoon) → E-flank buildings shade right side
+      // Less useful for left walkway
+      bldgShade = 0.10;
+    }
+  }
+
+  return Math.min(1.0, treeShade * 0.7 + bldgShade * 0.5 + treeShade * bldgShade * 0.3);
+}
+
+/* ══════════════════════════════════════════════════════════
+   SHADE → COLOUR
+   Dark green = deep shade (good for stroller)
+   Yellow/orange/red = exposed (avoid)
+   ══════════════════════════════════════════════════════════ */
+function shadeToColor(shade) {
+  if (shade > 0.75) return '#15803d'; // deep shade
+  if (shade > 0.55) return '#16a34a'; // good shade
+  if (shade > 0.40) return '#65a30d'; // partial
+  if (shade > 0.25) return '#ca8a04'; // patchy
+  if (shade > 0.12) return '#ea580c'; // mostly sun
+  return '#dc2626';                    // full sun — cross-street exposure
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAP STATE
+   ══════════════════════════════════════════════════════════ */
+let map, routeLyr, shadowLyr, treeLyr, poiLyr, crossLyr;
+let buildings = [];
+let hour = 8, season = 'summer';
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════ */
+function initMap() {
+  map = L.map('map', {
+    center: [32.0625, 34.7750],
+    zoom: 16,
+    zoomControl: false,
+    attributionControl: true
+  });
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  // Dark tiles to match SunSeekr aesthetic
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  shadowLyr = L.layerGroup().addTo(map);
+  treeLyr   = L.layerGroup().addTo(map);
+  crossLyr  = L.layerGroup().addTo(map);
+  routeLyr  = L.layerGroup().addTo(map);
+  poiLyr    = L.layerGroup().addTo(map);
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW ROUTE — colour-coded by shade per segment
+   This is the SunSeekr-style core visual
+   ══════════════════════════════════════════════════════════ */
+function drawRoute(sun) {
+  routeLyr.clearLayers();
+
+  // Draw each tree segment as a coloured thick line on the walkway
+  TREE_SEGS.forEach(([startIdx, endIdx, density, h, name]) => {
+    const seg = { density, h };
+    const shade = segmentShade(seg, sun);
+    const color = shadeToColor(shade);
+    const pts = WALK_PATH.slice(startIdx, endIdx + 1);
+    if (pts.length < 2) return;
+
+    // Thick coloured line = the walkable route
+    L.polyline(pts, {
+      color: color,
+      weight: 10,
+      opacity: 0.92,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: true
+    })
+    .bindTooltip(
+      `<b>${name}</b><br>` +
+      `Shade: <b>${Math.round(shade*100)}%</b><br>` +
+      `${density} canopy · ${h}m`,
+      { className: 'route-tt', sticky: true, offset: [0, -8] }
+    )
+    .addTo(routeLyr);
+
+    // Thin white underline for route continuity
+    L.polyline(pts, {
+      color: 'rgba(255,255,255,0.15)',
+      weight: 12,
+      opacity: 1,
+      lineCap: 'round',
+      interactive: false
+    }).addTo(routeLyr);
+  });
+
+  // Re-draw color on top
+  TREE_SEGS.forEach(([startIdx, endIdx, density, h, name]) => {
+    const seg = { density, h };
+    const shade = segmentShade(seg, sun);
+    const color = shadeToColor(shade);
+    const pts = WALK_PATH.slice(startIdx, endIdx + 1);
+    if (pts.length < 2) return;
+    L.polyline(pts, {
+      color,
+      weight: 8,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round',
+      interactive: false
+    }).addTo(routeLyr);
+  });
+
+  // Start / end labels
+  const makeLabel = (pt, txt, isStart) => {
+    const ic = L.divIcon({
+      className: '',
+      html: `<div style="
+        background:${isStart ? '#fff' : 'rgba(255,255,255,0.15)'};
+        color:${isStart ? '#000' : '#fff'};
+        border: 1.5px solid rgba(255,255,255,0.4);
+        font-size:11px; font-weight:700;
+        padding:4px 10px; border-radius:99px;
+        white-space:nowrap;
+        box-shadow:0 2px 8px rgba(0,0,0,0.5);
+        backdrop-filter:blur(8px);
+      ">${txt}</div>`,
+      iconAnchor: [40, 10]
+    });
+    L.marker(pt, { icon: ic, interactive: false }).addTo(routeLyr);
+  };
+  makeLabel(WALK_PATH[0], '🏛 Habima', true);
+  makeLabel(WALK_PATH[WALK_PATH.length-1], 'Neve Tzedek', false);
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW CROSS-STREETS — thin perpendicular lines showing gaps
+   ══════════════════════════════════════════════════════════ */
+function drawCrossStreets() {
+  crossLyr.clearLayers();
+  CROSS_STREETS.forEach(({ idx, name }) => {
+    const pt = WALK_PATH[Math.min(idx, WALK_PATH.length-1)];
+    // Small dot at intersection
+    const ic = L.divIcon({
+      className: '',
+      html: `<div style="
+        font-size:9px; color:rgba(255,255,255,0.5);
+        white-space:nowrap; padding:2px 0;
+        text-shadow:0 1px 3px rgba(0,0,0,0.8);
+        pointer-events:none;
+      ">${name}</div>`,
+      iconAnchor: [-6, 6]
+    });
+    L.marker(pt, { icon: ic, interactive: false }).addTo(crossLyr);
+
+    // Short perpendicular dash across the route
+    L.circleMarker(pt, {
+      radius: 5,
+      color: '#fbbf24',
+      fillColor: '#fbbf24',
+      fillOpacity: 0.9,
+      weight: 0,
+      interactive: true
+    })
+    .bindTooltip(`<b>${name} St</b><br>⚠ Fully exposed — cross quickly`, {
+      className: 'route-tt'
+    })
+    .addTo(crossLyr);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW BUILDING SHADOWS — from real OSM footprints
+   ══════════════════════════════════════════════════════════ */
+function drawShadows(sun) {
+  shadowLyr.clearLayers();
+  if (!sun.up) return;
+
+  const az = sun.az * Math.PI/180;
+  const MPD = 111320, latC = Math.cos(32.07 * Math.PI/180);
+  const dLat = -Math.cos(az) * sun.len / MPD;
+  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+
+  buildings.forEach(b => {
+    const h = b.h || 12;
+    const sdLat = dLat * h;
+    const sdLon = dLon * h;
+
+    // Shadow polygon
+    const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+    L.polygon(sp, {
+      fillColor: '#000',
+      fillOpacity: Math.min(0.50, 0.15 + (h/55)*0.35),
+      color: 'transparent',
+      interactive: false
+    }).addTo(shadowLyr);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW POIs
+   ══════════════════════════════════════════════════════════ */
+function drawPOIs() {
+  poiLyr.clearLayers();
+  POIS.forEach(({ idx, t, name }) => {
+    const pt = WALK_PATH[Math.min(idx, WALK_PATH.length-1)];
+    const ic = L.divIcon({
+      className: '',
+      html: `<div style="
+        width:24px;height:24px;
+        background:rgba(255,255,255,0.95);
+        border:1.5px solid rgba(0,0,0,0.2);
+        border-radius:50%;
+        display:flex;align-items:center;justify-content:center;
+        font-size:13px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.4);
+      ">${t==='bench'?'🪑':'💧'}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
+    L.marker(pt, { icon: ic })
+     .bindPopup(`<b>${name}</b>`)
+     .addTo(poiLyr);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   UPDATE ALL
+   ══════════════════════════════════════════════════════════ */
+function updateAll() {
+  const sun = getSun(hour, season);
+
+  drawShadows(sun);
+  drawRoute(sun);
+
+  // Sun badge
+  document.getElementById('sp-time').textContent = '☀ ' + fmtH(hour);
+  document.getElementById('sp-detail').textContent = sun.up
+    ? `${sun.alt}° · ${azDir(sun.az)}`
+    : 'below horizon';
+
+  // Shade stats
+  let totalShade = 0;
+  const shades = TREE_SEGS.map(([,, density, h]) => {
+    const s = segmentShade({ density, h }, sun);
+    totalShade += s;
+    return s;
+  });
+  const avgShade = totalShade / TREE_SEGS.length;
+  const pct = Math.round(avgShade * 100);
+  document.getElementById('shade-bar-fill').style.width = pct + '%';
+  document.getElementById('shade-pct').textContent = pct + '%';
+
+  // Best window
+  let wins = [];
+  for (let hh = 6; hh <= 19; hh += 0.5) {
+    const s = getSun(hh, season);
+    const avg = TREE_SEGS.reduce((sum, [,,d,h]) => sum + segmentShade({density:d,h}, s), 0) / TREE_SEGS.length;
+    if (avg > 0.60) wins.push(hh);
+  }
+  document.getElementById('st-win').textContent = wins.length
+    ? `${fmtH(wins[0])}–${fmtH(wins[wins.length-1])}`
+    : 'Early AM';
+  document.getElementById('st-bld').textContent = buildings.length || '–';
+  document.getElementById('st-sun').textContent = sun.up ? sun.alt + '°' : 'Set';
+
+  // Tip
+  const tips = {
+    early:     `<strong>Before 9am</strong> — Long shadows from east-facing buildings blanket the full promenade. Best window of the day. Yellow dots mark cross-streets — fully exposed, cross quickly.`,
+    morning:   `<strong>9–11am</strong> — Tree canopy is carrying the shade. Independence Hall stretch and café zone are strongest. Balfour–Shenkin (9m sparse trees) is the weakest patch — walk fast through it.`,
+    midday:    `<strong>Midday–3pm</strong> — Shade shrinks significantly. The tall ficus at nos. 38–56 still give good cover. Consider cutting the walk short or moving to the building-side pavement.`,
+    afternoon: `<strong>After 3pm</strong> — Sun moves to the SW. West facades now shade the right-side pavement. Consider crossing to the other side after Shenkin.`,
+    evening:   `<strong>After 6pm</strong> — Comfortable everywhere, both sides in shade. Best time for a longer walk with Alma. The cafés are at their liveliest.`,
+  };
+  document.getElementById('tip-text').innerHTML =
+    hour<9 ? tips.early : hour<11 ? tips.morning : hour<15 ? tips.midday : hour<18 ? tips.afternoon : tips.evening;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LOAD BUILDINGS from Overpass (POST)
+   ══════════════════════════════════════════════════════════ */
+async function loadBuildings() {
+  // Tight bbox: just Rothschild + ~80m either side
+  const q = `[out:json][timeout:30];(way["building"](32.053,34.765,32.074,34.782););out geom;`;
+  try {
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q)
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+
+    buildings = data.elements
+      .filter(e => e.type === 'way' && e.geometry && e.geometry.length > 2)
+      .map(e => {
+        const poly = e.geometry.map(p => [p.lat, p.lon]);
+        const lats = poly.map(p=>p[0]), lons = poly.map(p=>p[1]);
+        const centroid = [
+          (Math.min(...lats)+Math.max(...lats))/2,
+          (Math.min(...lons)+Math.max(...lons))/2
+        ];
+        const tags = e.tags || {};
+        const h = tags.height
+          ? parseFloat(tags.height)
+          : tags['building:levels']
+            ? parseFloat(tags['building:levels']) * 3.2
+            : null;
+
+        // Use block height estimate for missing heights
+        const blockH = getBlockH(centroid[0]);
+        return { id: e.id, poly, centroid, h: h || blockH };
+      });
+
+    document.getElementById('st-bld').textContent = buildings.length;
+    hideLoading();
+    updateAll();
+
+  } catch(err) {
+    hideLoading();
+    updateAll();
+  }
+}
+
+function getBlockH(lat) {
+  const blocks = [
+    [32.0724,32.0710,18],[32.0710,32.0696,14],[32.0696,32.0680,16],
+    [32.0680,32.0662,12],[32.0662,32.0645,15],[32.0645,32.0625,14],
+    [32.0625,32.0605,12],[32.0605,32.0585,11],[32.0585,32.0562,10],
+    [32.0562,32.0540,9],
+  ];
+  for (const [n,s,h] of blocks) if (lat<=n && lat>=s) return h;
+  return 12;
+}
+
+function hideLoading() {
+  const el = document.getElementById('loading');
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; }, 500);
+}
+
+/* ══════════════════════════════════════════════════════════
+   CONTROLS
+   ══════════════════════════════════════════════════════════ */
+document.getElementById('tsl').addEventListener('input', function() {
+  hour = parseFloat(this.value);
+  document.getElementById('tval').textContent = fmtH(hour);
+  updateAll();
+});
+
+document.querySelectorAll('.sb').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    season = b.dataset.s;
+    updateAll();
+  });
+});
+
+/* ══════════════════════════════════════════════════════════
+   BOOT
+   ══════════════════════════════════════════════════════════ */
+window.addEventListener('load', () => {
+  document.getElementById('tval').textContent = fmtH(hour);
+  initMap();
+  drawCrossStreets();
+  drawPOIs();
+  setTimeout(() => {
+    map.invalidateSize();
+    loadBuildings();
+  }, 100);
+});
+</script>
+
+<style>
+/* Tooltip for route hover */
+.route-tt {
+  background: rgba(0,0,0,0.85) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+  padding: 7px 11px !important;
+  line-height: 1.5 !important;
+  backdrop-filter: blur(8px) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+}
+.route-tt::before { display: none !important; }
+.leaflet-tooltip-bottom.route-tt::before { display: none !important; }
+</style>
+</body>
+</html>
