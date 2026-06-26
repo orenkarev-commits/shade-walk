@@ -12,14 +12,11 @@
   body { height: 100vh; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
   #map { position: fixed; inset: 0; }
 
-  /* ── TOP BAR ── */
   #top {
     position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
-    z-index: 200;
-    display: flex; align-items: center; gap: 10px; white-space: nowrap;
-    background: rgba(255,255,255,0.96);
-    border: 1px solid rgba(0,0,0,0.12); border-radius: 99px;
-    padding: 8px 10px 8px 18px;
+    z-index: 200; display: flex; align-items: center; gap: 10px; white-space: nowrap;
+    background: rgba(255,255,255,0.96); border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 99px; padding: 8px 10px 8px 18px;
     box-shadow: 0 4px 20px rgba(0,0,0,0.14);
   }
   #app-name { font-size: 13px; font-weight: 700; color: #111; }
@@ -32,38 +29,36 @@
   }
   .sb.on { background: #111; color: #fff; border-color: #111; }
 
-  /* ── SUN CARD (top-right) ── */
   #sun-card {
     position: fixed; top: 70px; right: 14px; z-index: 200;
-    background: rgba(255,255,255,0.96);
-    border: 1px solid rgba(0,0,0,0.10); border-radius: 12px;
-    padding: 10px 14px; font-size: 12px; color: #555; line-height: 1.7;
+    background: rgba(255,255,255,0.96); border: 1px solid rgba(0,0,0,0.10);
+    border-radius: 12px; padding: 10px 14px; font-size: 12px; color: #555; line-height: 1.7;
     box-shadow: 0 4px 16px rgba(0,0,0,0.10);
   }
   #sun-card strong { color: #111; font-size: 14px; font-weight: 700; display: block; }
 
-  /* ── EDIT POPUP ── */
+  #gis-status {
+    position: fixed; top: 70px; left: 14px; z-index: 200;
+    background: rgba(255,255,255,0.96); border: 1px solid rgba(0,0,0,0.10);
+    border-radius: 10px; padding: 7px 12px; font-size: 11px; color: #666; max-width: 240px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  }
+  #gis-status b { color: #15803d; }
+
   #edit-panel {
     position: fixed; z-index: 300; display: none;
     background: #fff; border: 1px solid rgba(0,0,0,0.14); border-radius: 12px;
-    padding: 14px 16px; min-width: 220px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+    padding: 14px 16px; min-width: 230px; box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   }
-  #edit-panel h4 { font-size: 12px; font-weight: 700; color: #111; margin-bottom: 10px; }
+  #edit-panel h4 { font-size: 12px; font-weight: 700; color: #111; margin-bottom: 4px; }
+  #edit-panel .sub { font-size: 10px; color: #888; margin-bottom: 10px; }
   .edit-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; color: #555; }
   .edit-row input[type=range] { flex: 1; accent-color: #15803d; }
-  .edit-row span { min-width: 44px; font-weight: 600; color: #111; text-align: right; }
-  #edit-close {
-    font-size: 11px; color: #999; cursor: pointer; margin-top: 6px;
-    text-align: right; display: block;
-  }
+  .edit-row span { min-width: 56px; font-weight: 600; color: #111; text-align: right; }
+  #edit-close { font-size: 11px; color: #999; cursor: pointer; margin-top: 6px; text-align: right; display: block; }
   #edit-close:hover { color: #111; }
 
-  /* ── HELP ── */
-  #help {
-    position: fixed; bottom: 54px; left: 14px; z-index: 200;
-    font-size: 11px; color: rgba(0,0,0,0.4);
-  }
+  #help { position: fixed; bottom: 16px; left: 14px; z-index: 200; font-size: 11px; color: rgba(0,0,0,0.45); }
 </style>
 </head>
 <body>
@@ -84,11 +79,14 @@
   <span id="sc-detail">–</span>
 </div>
 
+<div id="gis-status">Loading building heights from Tel Aviv GIS…</div>
+
 <div id="edit-panel">
   <h4 id="ep-title">–</h4>
+  <div class="sub" id="ep-sub">–</div>
   <div class="edit-row" id="ep-floors-row">
     <label>Floors</label>
-    <input type="range" id="ep-floors" min="1" max="15" step="1" value="4">
+    <input type="range" id="ep-floors" min="1" max="40" step="1" value="4">
     <span id="ep-floors-val">4 fl · 16m</span>
   </div>
   <div class="edit-row" id="ep-tree-row">
@@ -99,50 +97,42 @@
   <span id="edit-close">✕ close</span>
 </div>
 
-<div id="help">Click any building or tree section to edit height</div>
+<div id="help">Click any building or tree section to adjust its height</div>
 
 <script>
 /* ═══════════════════════════════════════════════════
+   CONSTANTS
+   ═══════════════════════════════════════════════════ */
+const MPD = 111320;
+const LAT = 32.064;
+const COS_LAT = Math.cos(LAT * Math.PI / 180);
+const FLOOR_M = 4;          // metres per floor (Oren's baseline)
+const KGOVA_CAP = 24;       // cap "no limit" (k_gova=100) zones at 24 floors
+
+// Tel Aviv GIS — TA5500 master plan, layer 138 = building-height zones (k_gova = max floors)
+const GIS_URL = 'https://gisn.tel-aviv.gov.il/arcgis/rest/services/WM/TA5500WM/MapServer/138/query';
+const BBOX_4326 = '34.7665,32.0520,34.7810,32.0695'; // lon,lat envelope along Rothschild
+
+/* ═══════════════════════════════════════════════════
    ROTHSCHILD CENTRELINE — verified OSM nodes
-   Way 154741757, Habima (NE) → Neve Tzedek (SW)
-   No live Overpass fetch — these coords are correct.
+   Habima (NE) → Neve Tzedek (SW)
    ═══════════════════════════════════════════════════ */
 const CL = [
-  [32.06820, 34.77793],  // 0  Habima
-  [32.06817, 34.77792],  // 1
-  [32.06672, 34.77746],  // 2  Allenby / King George
-  [32.06667, 34.77745],  // 3  Gruzenberg
-  [32.06662, 34.77743],  // 4
-  [32.06593, 34.77720],  // 5  Balfour
-  [32.06547, 34.77671],  // 6  Shenkin
-  [32.06543, 34.77667],  // 7
-  [32.06438, 34.77557],  // 8  Brenner
-  [32.06350, 34.77483],  // 9  Herzl
-  [32.06250, 34.77400],  // 10
-  [32.06150, 34.77320],  // 11 Ahad Ha'am
-  [32.06050, 34.77240],  // 12
-  [32.05950, 34.77170],  // 13 Shadal
-  [32.05860, 34.77110],  // 14
-  [32.05770, 34.77050],  // 15 Florentin
-  [32.05660, 34.76990],  // 16
-  [32.05560, 34.76940],  // 17
-  [32.05490, 34.76910],  // 18 Neve Tzedek
+  [32.06820, 34.77793], [32.06817, 34.77792], [32.06672, 34.77746],
+  [32.06667, 34.77745], [32.06662, 34.77743], [32.06593, 34.77720],
+  [32.06547, 34.77671], [32.06543, 34.77667], [32.06438, 34.77557],
+  [32.06350, 34.77483], [32.06250, 34.77400], [32.06150, 34.77320],
+  [32.06050, 34.77240], [32.05950, 34.77170], [32.05860, 34.77110],
+  [32.05770, 34.77050], [32.05660, 34.76990], [32.05560, 34.76940],
+  [32.05490, 34.76910],
 ];
+const ll = pts => pts.map(p => [p[1], p[0]]); // [lat,lon] → [lon,lat]
 
-const MPD = 111320;
-const LAT = 32.07;
-const COS_LAT = Math.cos(LAT * Math.PI / 180);
-
-/* Offset a polyline perpendicular by `metres`.
-   Positive = NW side (left walkway). Negative = SE side. */
 function offsetPoly(nodes, metres) {
   return nodes.map((n, i) => {
-    const p = nodes[Math.max(0, i - 1)];
-    const q = nodes[Math.min(nodes.length - 1, i + 1)];
-    const dLat = q[0] - p[0];
-    const dLon = (q[1] - p[1]) * COS_LAT;
-    const brg = Math.atan2(dLon, dLat);
-    const perp = brg + Math.PI / 2; // +PI/2 → NW side
+    const p = nodes[Math.max(0, i - 1)], q = nodes[Math.min(nodes.length - 1, i + 1)];
+    const dLat = q[0] - p[0], dLon = (q[1] - p[1]) * COS_LAT;
+    const perp = Math.atan2(dLon, dLat) + Math.PI / 2;
     return [
       n[0] + Math.cos(perp) * metres / MPD,
       n[1] + Math.sin(perp) * metres / (MPD * COS_LAT)
@@ -150,113 +140,80 @@ function offsetPoly(nodes, metres) {
   });
 }
 
-/* Convert [lat,lon] array → [lon,lat] for MapLibre */
-const ll = pts => pts.map(p => [p[1], p[0]]);
-
 /* ═══════════════════════════════════════════════════
-   SECTIONS between cross-streets
-   Each section = one editable building block per side
-         + one editable tree section in median
+   TREE MEDIAN SECTIONS — manual (no GIS tree layer here)
    ═══════════════════════════════════════════════════ */
-const SECTIONS = [
-  { name: 'Habima – Allenby',         from: 0,  to: 2  },
-  { name: 'Allenby – Gruzenberg',     from: 2,  to: 3  },
-  { name: 'Gruzenberg – Balfour',     from: 3,  to: 5  },
-  { name: 'Balfour – Shenkin',        from: 5,  to: 6  },
-  { name: 'Shenkin – Brenner',        from: 6,  to: 8  },
-  { name: 'Brenner – Herzl',          from: 8,  to: 9  },
-  { name: 'Herzl – Ahad Ha\'am',      from: 9,  to: 11 },
-  { name: "Ahad Ha'am – Shadal",      from: 11, to: 13 },
-  { name: 'Shadal – Florentin',       from: 13, to: 15 },
-  { name: 'Florentin – Neve Tzedek',  from: 15, to: 18 },
+const TREE_SECTIONS = [
+  { name: 'Habima – Allenby',        from: 0,  to: 2  },
+  { name: 'Allenby – Gruzenberg',    from: 2,  to: 3  },
+  { name: 'Gruzenberg – Balfour',    from: 3,  to: 5  },
+  { name: 'Balfour – Shenkin',       from: 5,  to: 6  },
+  { name: 'Shenkin – Brenner',       from: 6,  to: 8  },
+  { name: 'Brenner – Herzl',         from: 8,  to: 9  },
+  { name: "Herzl – Ahad Ha'am",      from: 9,  to: 11 },
+  { name: "Ahad Ha'am – Shadal",     from: 11, to: 13 },
+  { name: 'Shadal – Florentin',      from: 13, to: 15 },
+  { name: 'Florentin – Neve Tzedek', from: 15, to: 18 },
 ];
+const treeH = [12, 12, 12, 9, 12, 12, 12, 12, 12, 12];
 
-// Mutable state: floors per building (left/right) and tree heights per section
-const bFloors = { left: [4,4,4,4,4,4,4,4,4,3], right: [4,4,4,4,4,4,4,4,4,3] };
-const treeH   = [12, 12, 12, 9, 12, 12, 12, 12, 12, 12]; // metres, section 3 = sparse 9m
-
-/* ═══════════════════════════════════════════════════
-   GEOMETRY BUILDERS
-   ═══════════════════════════════════════════════════ */
-
-/* Ring for a building block along `pts` between inner and outer offsets */
 function blockRing(pts, innerM, outerM) {
-  const inner = ll(offsetPoly(pts, innerM));
-  const outer = ll(offsetPoly(pts, outerM));
+  const inner = ll(offsetPoly(pts, innerM)), outer = ll(offsetPoly(pts, outerM));
   return [...inner, ...outer.slice().reverse(), inner[0]];
 }
-
-/* Build the full buildings GeoJSON */
-function buildingsGJ() {
-  const features = [];
-  SECTIONS.forEach((sec, i) => {
-    const pts = CL.slice(sec.from, sec.to + 1);
-    if (pts.length < 2) return;
-    // NW side: 13 – 28m from centreline
-    features.push({
-      type: 'Feature',
-      id: `BL${i}`,
-      properties: { type: 'building', side: 'left',  idx: i, height: bFloors.left[i]  * 4, name: sec.name + ' (NW)' },
-      geometry: { type: 'Polygon', coordinates: [blockRing(pts,  13,  28)] }
-    });
-    // SE side: same offset in opposite direction
-    features.push({
-      type: 'Feature',
-      id: `BR${i}`,
-      properties: { type: 'building', side: 'right', idx: i, height: bFloors.right[i] * 4, name: sec.name + ' (SE)' },
-      geometry: { type: 'Polygon', coordinates: [blockRing(pts, -13, -28)] }
-    });
-  });
-  return { type: 'FeatureCollection', features };
-}
-
-/* Build tree median GeoJSON — 5m band either side of centreline */
 function treesGJ() {
-  const features = [];
-  SECTIONS.forEach((sec, i) => {
-    const pts = CL.slice(sec.from, sec.to + 1);
-    if (pts.length < 2) return;
-    features.push({
-      type: 'Feature',
-      id: `T${i}`,
-      properties: { type: 'tree', idx: i, height: treeH[i], name: sec.name + ' (trees)' },
-      geometry: { type: 'Polygon', coordinates: [blockRing(pts, -4.5, 4.5)] }
-    });
-  });
-  return { type: 'FeatureCollection', features };
+  return {
+    type: 'FeatureCollection',
+    features: TREE_SECTIONS.map((sec, i) => ({
+      type: 'Feature', id: 2000 + i,
+      properties: { kind: 'tree', idx: i, height: treeH[i], name: sec.name },
+      geometry: { type: 'Polygon', coordinates: [blockRing(CL.slice(sec.from, sec.to + 1), -4.5, 4.5)] }
+    }))
+  };
 }
-
-/* Walk path — 8m NW offset of centreline */
 function walkGJ() {
   return { type: 'Feature', geometry: { type: 'LineString', coordinates: ll(offsetPoly(CL, 8)) } };
 }
 
 /* ═══════════════════════════════════════════════════
-   SUN — SunCalc.js for accurate Tel Aviv position
+   FALLBACK building blocks (used only if GIS fetch fails)
+   ═══════════════════════════════════════════════════ */
+function fallbackBuildingsGJ() {
+  const feats = [];
+  TREE_SECTIONS.forEach((sec, i) => {
+    const pts = CL.slice(sec.from, sec.to + 1);
+    feats.push({ type: 'Feature', id: 3000 + i * 2,
+      properties: { kind: 'building', floors: 4, height: 16, name: sec.name + ' (NW)', src: 'estimate' },
+      geometry: { type: 'Polygon', coordinates: [blockRing(pts, 13, 28)] } });
+    feats.push({ type: 'Feature', id: 3000 + i * 2 + 1,
+      properties: { kind: 'building', floors: 4, height: 16, name: sec.name + ' (SE)', src: 'estimate' },
+      geometry: { type: 'Polygon', coordinates: [blockRing(pts, -13, -28)] } });
+  });
+  return { type: 'FeatureCollection', features: feats };
+}
+
+/* ═══════════════════════════════════════════════════
+   STATE — building GeoJSON is mutable (edited in place)
+   ═══════════════════════════════════════════════════ */
+let buildingsData = fallbackBuildingsGJ();
+
+/* ═══════════════════════════════════════════════════
+   SUN — SunCalc.js, Tel Aviv
    ═══════════════════════════════════════════════════ */
 const SEASON_DATE = {
-  summer: [2025, 6, 1, 3],   // July 1, UTC+3 (IDT)
-  spring: [2025, 2, 21, 2],  // Mar 21, UTC+2 (IST)
-  autumn: [2025, 8, 21, 3],  // Sep 21, UTC+3
-  winter: [2025, 11, 21, 2], // Dec 21, UTC+2
+  summer: [2025, 6, 1, 3], spring: [2025, 2, 21, 2],
+  autumn: [2025, 8, 21, 3], winter: [2025, 11, 21, 2],
 };
 const DIR16 = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-
 function getSun(hour, season) {
   const [y, m, d, tz] = SEASON_DATE[season];
   const hh = Math.floor(hour), mm = hour % 1 === 0.5 ? 30 : 0;
   const date = new Date(Date.UTC(y, m, d, hh - tz, mm));
-  const pos  = SunCalc.getPosition(date, 32.0639, 34.7717);
-  const alt  = pos.altitude * 180 / Math.PI;
-  const az   = (pos.azimuth  * 180 / Math.PI + 180 + 360) % 360;
-  return {
-    alt: Math.round(alt * 10) / 10,
-    az:  Math.round(az),
-    up:  alt > 0.5,
-    dir: DIR16[Math.round(az / 22.5) % 16]
-  };
+  const pos = SunCalc.getPosition(date, 32.0639, 34.7717);
+  const alt = pos.altitude * 180 / Math.PI;
+  const az  = (pos.azimuth * 180 / Math.PI + 180 + 360) % 360;
+  return { alt: Math.round(alt*10)/10, az: Math.round(az), up: alt > 0.5, dir: DIR16[Math.round(az/22.5)%16] };
 }
-
 const fmtH = h => {
   const hh = Math.floor(h), mm = h % 1 === 0.5 ? '30' : '00';
   const ap = hh < 12 ? 'am' : 'pm', d = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
@@ -264,238 +221,240 @@ const fmtH = h => {
 };
 
 /* ═══════════════════════════════════════════════════
-   SHADOW POLYGONS — computed from sun position
-   For each polygon, project each vertex in the shadow
-   direction by (height / tan(altitude)).
+   SHADOW POLYGONS — project each footprint away from sun
    ═══════════════════════════════════════════════════ */
 function computeShadows(gj, sun) {
   if (!sun.up) return { type: 'FeatureCollection', features: [] };
-  const az    = sun.az * Math.PI / 180;
-  const tanA  = Math.tan(sun.alt * Math.PI / 180);
-  const features = gj.features.map(f => {
-    const h   = f.properties.height;
-    const len = h / tanA; // shadow length in metres
+  const az = sun.az * Math.PI / 180, tanA = Math.tan(sun.alt * Math.PI / 180);
+  const feats = [];
+  gj.features.forEach(f => {
+    const h = f.properties.height; if (!h) return;
+    const len = h / tanA;
     const dLon = -Math.sin(az) * len / (MPD * COS_LAT);
     const dLat = -Math.cos(az) * len / MPD;
     const ring = f.geometry.coordinates[0];
     const shifted = ring.map(([lo, la]) => [lo + dLon, la + dLat]);
-    // Union of footprint + shifted footprint = shadow slab
     const sRing = [...ring.slice(0, -1), ...shifted.slice(0, -1).reverse(), ring[0]];
-    return { type: 'Feature', geometry: { type: 'Polygon', coordinates: [sRing] } };
+    feats.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [sRing] } });
   });
-  return { type: 'FeatureCollection', features };
+  return { type: 'FeatureCollection', features: feats };
 }
 
 /* ═══════════════════════════════════════════════════
-   MAP INIT
+   MAP
    ═══════════════════════════════════════════════════ */
 const map = new maplibregl.Map({
   container: 'map',
   style: 'https://tiles.openfreemap.org/styles/bright',
-  center: [34.7737, 32.0625],
-  zoom: 16,
-  pitch: 50,
-  bearing: 15,
-  antialias: true,
-  maxPitch: 70
+  center: [34.7737, 32.0625], zoom: 16, pitch: 52, bearing: 15,
+  antialias: true, maxPitch: 70
 });
 map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
 
 let hour = 9, season = 'summer';
 
 map.on('load', () => {
-  // Remove any flat building fill from the base style so we own the buildings
-  ['building', 'building-top', 'building_fill'].forEach(id => {
-    if (map.getLayer(id)) map.removeLayer(id);
-  });
+  ['building', 'building-top', 'building_fill'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
   const firstLabel = map.getStyle().layers.find(l => l.type === 'symbol')?.id;
 
-  /* ── Shadow layer (rendered UNDER buildings) ── */
   map.addSource('shadows', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-  map.addLayer({
-    id: 'shadows', type: 'fill', source: 'shadows',
-    paint: { 'fill-color': '#1a1200', 'fill-opacity': 0.30 }
-  }, firstLabel);
+  map.addLayer({ id: 'shadows', type: 'fill', source: 'shadows',
+    paint: { 'fill-color': '#1a1200', 'fill-opacity': 0.28 } }, firstLabel);
 
-  /* ── Tree extrusions ── */
   map.addSource('trees', { type: 'geojson', data: treesGJ() });
-  map.addLayer({
-    id: 'trees-3d', type: 'fill-extrusion', source: 'trees',
-    paint: {
-      'fill-extrusion-color': '#2d6a1f',
-      'fill-extrusion-height': ['get', 'height'],
-      'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.85
-    }
-  }, firstLabel);
+  map.addLayer({ id: 'trees-3d', type: 'fill-extrusion', source: 'trees',
+    paint: { 'fill-extrusion-color': '#2d6a1f', 'fill-extrusion-height': ['get', 'height'],
+             'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0.85 } }, firstLabel);
 
-  /* ── Building extrusions ── */
-  map.addSource('buildings', { type: 'geojson', data: buildingsGJ() });
-  map.addLayer({
-    id: 'buildings-3d', type: 'fill-extrusion', source: 'buildings',
+  map.addSource('buildings', { type: 'geojson', data: buildingsData });
+  map.addLayer({ id: 'buildings-3d', type: 'fill-extrusion', source: 'buildings',
     paint: {
-      'fill-extrusion-color': '#e8e0d4',
+      'fill-extrusion-color': [
+        'case', ['==', ['get', 'src'], 'gis'], '#cdb89a', '#e2dccf'
+      ],
       'fill-extrusion-height': ['get', 'height'],
-      'fill-extrusion-base': 0,
-      'fill-extrusion-opacity': 0.95,
+      'fill-extrusion-base': 0, 'fill-extrusion-opacity': 0.95,
       'fill-extrusion-ambient-occlusion-intensity': 0.35,
       'fill-extrusion-ambient-occlusion-radius': 2
-    }
-  }, firstLabel);
+    } }, firstLabel);
 
-  /* ── Walkway line ── */
   map.addSource('walk', { type: 'geojson', data: walkGJ() });
   map.addLayer({ id: 'walk-halo', type: 'line', source: 'walk',
     paint: { 'line-color': '#fff', 'line-width': 12, 'line-opacity': 0.7 } });
   map.addLayer({ id: 'walk-line', type: 'line', source: 'walk',
-    paint: { 'line-color': '#15803d', 'line-width': 7, 'line-opacity': 1,
-             'line-cap': 'round', 'line-join': 'round' } });
+    paint: { 'line-color': '#15803d', 'line-width': 7, 'line-cap': 'round', 'line-join': 'round' } });
 
-  /* ── Terminal labels ── */
-  const walkCoords = ll(offsetPoly(CL, 8));
-  addPill(walkCoords[0], '▲ Habima', '#15803d');
-  addPill(walkCoords[walkCoords.length - 1], 'Neve Tzedek', '#666');
+  const wc = ll(offsetPoly(CL, 8));
+  addPill(wc[0], '▲ Habima', '#15803d');
+  addPill(wc[wc.length - 1], 'Neve Tzedek', '#666');
 
-  /* ── Click to edit ── */
   map.on('click', 'buildings-3d', onFeatureClick);
-  map.on('click', 'trees-3d',     onFeatureClick);
-  map.on('mouseenter', 'buildings-3d', () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'buildings-3d', () => map.getCanvas().style.cursor = '');
-  map.on('mouseenter', 'trees-3d',     () => map.getCanvas().style.cursor = 'pointer');
-  map.on('mouseleave', 'trees-3d',     () => map.getCanvas().style.cursor = '');
+  map.on('click', 'trees-3d', onFeatureClick);
+  ['buildings-3d', 'trees-3d'].forEach(L => {
+    map.on('mouseenter', L, () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', L, () => map.getCanvas().style.cursor = '');
+  });
 
   updateAll();
+  loadGIS();
 });
 
 /* ═══════════════════════════════════════════════════
-   UPDATE — called on time/season change
+   LOAD GIS BUILDING HEIGHTS — layer 138, k_gova = floors
+   Runs in the user's browser (reaches gisn.tel-aviv.gov.il).
+   ═══════════════════════════════════════════════════ */
+async function loadGIS() {
+  const url = GIS_URL
+    + '?where=' + encodeURIComponent('1=1')
+    + '&geometry=' + encodeURIComponent(BBOX_4326)
+    + '&geometryType=esriGeometryEnvelope'
+    + '&inSR=4326&outSR=4326'
+    + '&spatialRel=esriSpatialRelIntersects'
+    + '&outFields=' + encodeURIComponent('k_gova,MaxGovaInc')
+    + '&returnGeometry=true&f=geojson';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const gj = await res.json();
+    if (!gj.features || !gj.features.length) throw new Error('no features');
+
+    let id = 5000, count = 0;
+    const feats = [];
+    gj.features.forEach(f => {
+      const k = f.properties.k_gova || f.properties.MaxGovaInc;
+      if (!k || !f.geometry) return;
+      const floors = k >= 100 ? KGOVA_CAP : k;
+      const height = floors * FLOOR_M;
+      // Flatten MultiPolygon → individual polygons so each is clickable/editable
+      const polys = f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates];
+      polys.forEach(rings => {
+        feats.push({
+          type: 'Feature', id: id++,
+          properties: { kind: 'building', floors, height, gisFloors: k,
+                        name: 'TLV GIS zone', src: 'gis' },
+          geometry: { type: 'Polygon', coordinates: rings }
+        });
+        count++;
+      });
+    });
+
+    if (!count) throw new Error('no usable polygons');
+    buildingsData = { type: 'FeatureCollection', features: feats };
+    map.getSource('buildings').setData(buildingsData);
+    updateAll();
+    document.getElementById('gis-status').innerHTML =
+      `<b>✓ Tel Aviv GIS</b> — ${count} building-height zones loaded (k_gova → floors × ${FLOOR_M}m). Click any to adjust.`;
+  } catch (e) {
+    document.getElementById('gis-status').innerHTML =
+      `⚠ GIS unreachable (${e.message}). Using estimated 4-floor blocks — click to edit. ` +
+      `<span style="color:#999">Likely CORS; the static fallback is shown.</span>`;
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   UPDATE
    ═══════════════════════════════════════════════════ */
 function updateAll() {
   const sun = getSun(hour, season);
-
-  // MapLibre v4 directional light — shadows from extrusions
   if (sun.up) {
     try {
       map.setLights([
-        { id: 'ambient', type: 'ambient',     properties: { color: '#fff', intensity: 0.28 } },
-        { id: 'sun',     type: 'directional', properties: {
-          color: '#fff9e0', intensity: 0.92,
-          direction: [sun.az, 90 - sun.alt],
-          'cast-shadows': true, 'shadow-intensity': 0.80
-        }}
+        { id: 'ambient', type: 'ambient', properties: { color: '#fff', intensity: 0.28 } },
+        { id: 'sun', type: 'directional', properties: {
+          color: '#fff9e0', intensity: 0.92, direction: [sun.az, 90 - sun.alt],
+          'cast-shadows': true, 'shadow-intensity': 0.8 } }
       ]);
     } catch (_) {}
   } else {
     try { map.setLights([{ id: 'ambient', type: 'ambient', properties: { color: '#b0c4de', intensity: 0.5 } }]); } catch (_) {}
   }
 
-  // Ground shadow polygons
-  const bGJ = buildingsGJ();
-  const tGJ = treesGJ();
   const shadowFeatures = [
-    ...computeShadows(bGJ, sun).features,
-    ...computeShadows(tGJ, sun).features
+    ...computeShadows(buildingsData, sun).features,
+    ...computeShadows(treesGJ(), sun).features
   ];
-  if (map.getSource('shadows')) {
+  if (map.getSource('shadows'))
     map.getSource('shadows').setData({ type: 'FeatureCollection', features: shadowFeatures });
-  }
 
-  // Sun info card
   document.getElementById('sc-time').textContent = '☀ ' + fmtH(hour);
   document.getElementById('sc-detail').innerHTML = sun.up
-    ? `${sun.alt}° altitude · from ${sun.dir} (${sun.az}°)<br>Shadow len: ${sun.alt > 0.5 ? Math.round(1 / Math.tan(sun.alt * Math.PI / 180) * 16) + 'm (16m bldg)' : '—'}`
+    ? `${sun.alt}° altitude · from ${sun.dir} (${sun.az}°)<br>16m bldg casts ${Math.round(16/Math.tan(sun.alt*Math.PI/180))}m shadow`
     : 'Sun below horizon';
 }
 
 /* ═══════════════════════════════════════════════════
-   CLICK → EDIT PANEL
+   EDIT PANEL
    ═══════════════════════════════════════════════════ */
-let editTarget = null; // { type, side, idx }
-
+let editTarget = null;
 function onFeatureClick(e) {
-  const feat = e.features[0];
-  const props = feat.properties;
-  const panel = document.getElementById('edit-panel');
+  const f = e.features[0], p = f.properties, panel = document.getElementById('edit-panel');
+  editTarget = { id: f.id, kind: p.kind, idx: p.idx };
 
-  editTarget = props;
-
-  // Position panel near click point
-  const x = Math.min(e.point.x + 12, window.innerWidth  - 240);
-  const y = Math.min(e.point.y - 20, window.innerHeight - 160);
-  panel.style.left = x + 'px';
-  panel.style.top  = y + 'px';
+  panel.style.left = Math.min(e.point.x + 12, innerWidth - 250) + 'px';
+  panel.style.top  = Math.min(e.point.y - 20, innerHeight - 170) + 'px';
   panel.style.display = 'block';
 
-  document.getElementById('ep-title').textContent = props.name;
-
-  if (props.type === 'building') {
-    const floors = props.side === 'left' ? bFloors.left[props.idx] : bFloors.right[props.idx];
+  if (p.kind === 'building') {
+    document.getElementById('ep-title').textContent = p.src === 'gis' ? 'Building (TLV GIS)' : 'Building (estimate)';
+    document.getElementById('ep-sub').textContent = p.src === 'gis'
+      ? `GIS k_gova = ${p.gisFloors} floors` : 'No GIS data — estimate';
     document.getElementById('ep-floors-row').style.display = 'flex';
-    document.getElementById('ep-tree-row').style.display   = 'none';
-    document.getElementById('ep-floors').value = floors;
-    document.getElementById('ep-floors-val').textContent = `${floors} fl · ${floors * 4}m`;
+    document.getElementById('ep-tree-row').style.display = 'none';
+    document.getElementById('ep-floors').value = p.floors;
+    document.getElementById('ep-floors-val').textContent = `${p.floors} fl · ${p.floors * FLOOR_M}m`;
   } else {
+    document.getElementById('ep-title').textContent = 'Tree section';
+    document.getElementById('ep-sub').textContent = p.name;
     document.getElementById('ep-floors-row').style.display = 'none';
-    document.getElementById('ep-tree-row').style.display   = 'flex';
-    document.getElementById('ep-tree').value = treeH[props.idx];
-    document.getElementById('ep-tree-val').textContent = treeH[props.idx] + ' m';
+    document.getElementById('ep-tree-row').style.display = 'flex';
+    document.getElementById('ep-tree').value = treeH[p.idx];
+    document.getElementById('ep-tree-val').textContent = treeH[p.idx] + ' m';
   }
 }
 
 document.getElementById('ep-floors').addEventListener('input', function () {
-  if (!editTarget || editTarget.type !== 'building') return;
+  if (!editTarget || editTarget.kind !== 'building') return;
   const f = parseInt(this.value);
-  if (editTarget.side === 'left')  bFloors.left[editTarget.idx]  = f;
-  else                              bFloors.right[editTarget.idx] = f;
-  document.getElementById('ep-floors-val').textContent = `${f} fl · ${f * 4}m`;
-  if (map.getSource('buildings')) map.getSource('buildings').setData(buildingsGJ());
+  const feat = buildingsData.features.find(x => x.id === editTarget.id);
+  if (feat) { feat.properties.floors = f; feat.properties.height = f * FLOOR_M; }
+  document.getElementById('ep-floors-val').textContent = `${f} fl · ${f * FLOOR_M}m`;
+  map.getSource('buildings').setData(buildingsData);
   updateAll();
 });
-
 document.getElementById('ep-tree').addEventListener('input', function () {
-  if (!editTarget || editTarget.type !== 'tree') return;
+  if (!editTarget || editTarget.kind !== 'tree') return;
   const h = parseInt(this.value);
   treeH[editTarget.idx] = h;
   document.getElementById('ep-tree-val').textContent = h + ' m';
-  if (map.getSource('trees')) map.getSource('trees').setData(treesGJ());
+  map.getSource('trees').setData(treesGJ());
   updateAll();
 });
-
 document.getElementById('edit-close').addEventListener('click', () => {
-  document.getElementById('edit-panel').style.display = 'none';
-  editTarget = null;
+  document.getElementById('edit-panel').style.display = 'none'; editTarget = null;
 });
 
 /* ═══════════════════════════════════════════════════
-   HELPERS
+   HELPERS / CONTROLS
    ═══════════════════════════════════════════════════ */
 function addPill(lngLat, txt, bg) {
   const el = Object.assign(document.createElement('div'), {
     textContent: txt,
-    style: `background:${bg};color:#fff;font-size:11px;font-weight:700;
-            padding:3px 9px;border-radius:99px;white-space:nowrap;
-            box-shadow:0 2px 6px rgba(0,0,0,0.25);`
+    style: `background:${bg};color:#fff;font-size:11px;font-weight:700;padding:3px 9px;
+            border-radius:99px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.25);`
   });
   new maplibregl.Marker({ element: el, anchor: 'left' }).setLngLat(lngLat).addTo(map);
 }
 
-/* ═══════════════════════════════════════════════════
-   CONTROLS
-   ═══════════════════════════════════════════════════ */
 document.getElementById('tsl').addEventListener('input', function () {
   hour = parseFloat(this.value);
   document.getElementById('tval').textContent = fmtH(hour);
   if (map.loaded()) updateAll();
 });
-
-document.querySelectorAll('.sb').forEach(b => {
-  b.addEventListener('click', () => {
-    document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
-    b.classList.add('on');
-    season = b.dataset.s;
-    if (map.loaded()) updateAll();
-  });
-});
+document.querySelectorAll('.sb').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); season = b.dataset.s;
+  if (map.loaded()) updateAll();
+}));
 </script>
 </body>
 </html>
