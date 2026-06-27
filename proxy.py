@@ -213,6 +213,63 @@ def list_layers():
         return jsonify({"error": str(e)}), 500
 
 
+def _discover_layers():
+    """Walk every polygon layer in TA5500WM and return the ones whose
+    field list contains a known building-height field (k_gova or
+    MaxGovaInc) or whose name contains 'גובה'."""
+    r = requests.get(f"{GIS_BASE}/layers?f=json", timeout=15)
+    r.raise_for_status()
+    all_layers = r.json().get("layers", [])
+    candidates = []
+    for lyr in all_layers:
+        lid = lyr.get("id")
+        name = lyr.get("name") or ""
+        geom = lyr.get("geometryType") or ""
+        if "Polygon" not in geom:
+            continue
+        try:
+            lr = requests.get(f"{GIS_BASE}/{lid}?f=json", timeout=8)
+            if lr.status_code != 200:
+                continue
+            meta = lr.json()
+            fields = [f.get("name", "") for f in meta.get("fields", [])]
+            field_str = ",".join(fields).lower()
+            score = 0
+            why = []
+            if "k_gova" in field_str:
+                score += 10; why.append("has k_gova")
+            if "maxgovainc" in field_str:
+                score += 5; why.append("has MaxGovaInc")
+            if "גובה" in name:
+                score += 3; why.append("name mentions גובה")
+            if "build" in name.lower() or "בינוי" in name:
+                score += 2; why.append("name mentions building")
+            if score > 0:
+                candidates.append({
+                    "id": lid, "name": name, "score": score,
+                    "why": why, "fields": fields[:20]
+                })
+        except requests.exceptions.RequestException:
+            continue
+    candidates.sort(key=lambda c: -c["score"])
+    return candidates
+
+
+@app.route("/discover")
+def discover():
+    """Auto-find the building-height layer in TA5500WM. Returns
+    ranked candidates; the top one is the recommended LAYER_ID."""
+    try:
+        candidates = _discover_layers()
+        return jsonify({
+            "recommended_layer": candidates[0]["id"] if candidates else None,
+            "candidates": candidates,
+            "tip": "Set LAYER_ID = recommended_layer in proxy.py and restart."
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 # ── MAIN ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -220,14 +277,28 @@ if __name__ == "__main__":
     print("  Rothschild Shade Walk — TLV GIS Proxy")
     print("=" * 60)
     print(f"  GIS base:  {GIS_BASE}")
-    print(f"  Layer ID:  {LAYER_ID}  (update if needed — run /layers to check)")
     print(f"  pyproj:    {'installed ✓' if HAS_PYPROJ else 'MISSING — install: pip install pyproj'}")
     print()
-    print("  Endpoints:")
-    print("    http://localhost:5001/status   — GIS server reachable?")
-    print("    http://localhost:5001/layers   — list all TA5500WM layers")
-    print("    http://localhost:5001/heights  — Rothschild building heights")
+    print(f"  Auto-discovering building-height layer …")
+    try:
+        cands = _discover_layers()
+        if cands:
+            LAYER_ID = cands[0]["id"]
+            print(f"  Layer ID:  {LAYER_ID}  ({cands[0]['name']})")
+            print(f"             ↳ matched: {', '.join(cands[0]['why'])}")
+            if len(cands) > 1:
+                others = ", ".join(f"{c['id']}" for c in cands[1:4])
+                print(f"             other candidates: {others}")
+        else:
+            print(f"  Layer ID:  {LAYER_ID}  (no auto-match — using hardcoded default)")
+    except Exception as e:
+        print(f"  Discovery failed: {e}")
+        print(f"  Layer ID:  {LAYER_ID}  (using hardcoded default)")
     print()
-    print("  In the app: GIS Connect tab → click 'Connect to GIS proxy'")
+    print("  Endpoints:")
+    print("    http://localhost:5001/status    — GIS server reachable?")
+    print("    http://localhost:5001/layers    — list all TA5500WM layers")
+    print("    http://localhost:5001/discover  — auto-find height layer")
+    print("    http://localhost:5001/heights   — Rothschild building heights")
     print("=" * 60)
     app.run(host="localhost", port=5001, debug=False)
