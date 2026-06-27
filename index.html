@@ -8,7 +8,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; background: #0d0d0d; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
+  html, body { height: 100%; background: #f3f4f6; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
 
   /* ── FULL-SCREEN MAP ── */
   #map { position: fixed; inset: 0; z-index: 0; }
@@ -103,8 +103,8 @@
     border-radius: 14px; padding: 10px 14px;
     display: flex; flex-direction: column; gap: 6px;
   }
-  .li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.6); }
-  .lc { width: 28px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+  .li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.7); }
+  .lc { width: 18px; height: 10px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.1); }
 
   /* ── SUN POSITION ── */
   #sun-pos {
@@ -121,23 +121,23 @@
   /* ── LOADING ── */
   #loading {
     position: fixed; inset: 0; z-index: 9999;
-    background: #0d0d0d;
+    background: #f3f4f6;
     display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 12px;
     transition: opacity 0.5s;
   }
   #lring, .lring {
     width: 28px; height: 28px;
-    border: 2px solid rgba(255,255,255,0.1);
-    border-top-color: #fff;
+    border: 2px solid rgba(0,0,0,0.1);
+    border-top-color: #111;
     border-radius: 50%;
     animation: spin 0.7s linear infinite;
     margin: 0 auto;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #lmsg { font-size: 13px; color: rgba(255,255,255,0.45); }
+  #lmsg { font-size: 13px; color: rgba(0,0,0,0.45); }
 
-  .leaflet-container { background: #1a1a1a; }
+  .leaflet-container { background: #e5e7eb; }
 
   /* ── DATE PICKER ── */
   #date-pick {
@@ -361,10 +361,10 @@
 
 <!-- Legend -->
 <div id="legend">
-  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#14532d,#16a34a);height:6px;border-radius:3px;"></div>Deep shade</div>
-  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#ca8a04,#fbbf24);height:6px;border-radius:3px;"></div>Partial shade</div>
-  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#dc2626,#f97316);height:6px;border-radius:3px;"></div>Full sun ⚠</div>
-  <div class="li"><div class="lc" style="background:rgba(255,255,255,0.3);height:2px;border-radius:1px;"></div>Cross-streets</div>
+  <div class="li"><div class="lc" style="background:#0b0f19;opacity:0.55;"></div>Building shadow</div>
+  <div class="li"><div class="lc" style="background:#14532d;opacity:0.45;"></div>Tree canopy shadow</div>
+  <div class="li"><div class="lc" style="background:#0ea5e9;opacity:0.4;"></div>Building (click to edit)</div>
+  <div class="li"><div class="lc" style="background:#fbbf24;"></div>Cross-street</div>
 </div>
 
 <!-- Sun position -->
@@ -660,7 +660,7 @@ let currentDate = seasonToDate('summer');
 let gisStatus = 'pending'; // 'ok' | 'offline' | 'pending'
 let sourceCounts = { gis: 0, osm: 0 };
 let editingBuilding = null;
-let shadowSamples = null;     // last computed heatmap samples
+// (heatmap cache is invalidated by heatmapBuiltForDate, defined below)
 let heatmapVisible = false;
 
 const GIS_PROXY_URL = 'http://localhost:5001';
@@ -678,8 +678,8 @@ function initMap() {
 
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-  // Dark tiles to match SunSeekr aesthetic
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  // Light Google-Maps-style basemap — high shadow contrast
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
     attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
     subdomains: 'abcd',
     maxZoom: 19
@@ -701,43 +701,28 @@ function drawRoute(sun) {
   routeLyr.clearLayers();
   const blocks = getTreeBlocks();
 
+  // Clean thin walkway line (neutral on light basemap)
+  L.polyline(WALK_PATH, {
+    color: '#111827', weight: 3, opacity: 0.55,
+    lineCap: 'round', lineJoin: 'round',
+    interactive: false
+  }).addTo(routeLyr);
+
+  // Invisible thick line for per-block tooltips
   blocks.forEach(blk => {
-    const shade = segmentShade(blk, sun);
-    const color = shadeToColor(shade);
     const pts = WALK_PATH.slice(blk.startIdx, blk.endIdx + 1);
     if (pts.length < 2) return;
-
     L.polyline(pts, {
-      color, weight: 10, opacity: 0.92,
-      lineCap: 'round', lineJoin: 'round',
+      color: '#000', weight: 14, opacity: 0,
       interactive: true
     })
     .bindTooltip(
       `<b>${blk.label}</b><br>` +
-      `Shade: <b>${Math.round(shade*100)}%</b><br>` +
       `${blk.density} canopy · ${blk.h}m` +
-      (blk.override ? ' <span style="color:#86efac">(edited)</span>' : ''),
+      (blk.override ? ' <span style="color:#16a34a">(edited)</span>' : ''),
       { className: 'route-tt', sticky: true, offset: [0, -8] }
     )
     .addTo(routeLyr);
-
-    L.polyline(pts, {
-      color: 'rgba(255,255,255,0.15)',
-      weight: 12, opacity: 1,
-      lineCap: 'round', interactive: false
-    }).addTo(routeLyr);
-  });
-
-  blocks.forEach(blk => {
-    const shade = segmentShade(blk, sun);
-    const color = shadeToColor(shade);
-    const pts = WALK_PATH.slice(blk.startIdx, blk.endIdx + 1);
-    if (pts.length < 2) return;
-    L.polyline(pts, {
-      color, weight: 8, opacity: 0.95,
-      lineCap: 'round', lineJoin: 'round',
-      interactive: false
-    }).addTo(routeLyr);
   });
 
   // Start / end labels
@@ -745,14 +730,13 @@ function drawRoute(sun) {
     const ic = L.divIcon({
       className: '',
       html: `<div style="
-        background:${isStart ? '#fff' : 'rgba(255,255,255,0.15)'};
-        color:${isStart ? '#000' : '#fff'};
-        border: 1.5px solid rgba(255,255,255,0.4);
+        background:${isStart ? '#111827' : '#fff'};
+        color:${isStart ? '#fff' : '#111827'};
+        border: 1.5px solid rgba(0,0,0,0.15);
         font-size:11px; font-weight:700;
         padding:4px 10px; border-radius:99px;
         white-space:nowrap;
-        box-shadow:0 2px 8px rgba(0,0,0,0.5);
-        backdrop-filter:blur(8px);
+        box-shadow:0 2px 8px rgba(0,0,0,0.18);
       ">${txt}</div>`,
       iconAnchor: [40, 10]
     });
@@ -803,46 +787,62 @@ function drawCrossStreets() {
    ══════════════════════════════════════════════════════════ */
 function drawShadows(sun) {
   shadowLyr.clearLayers();
-  if (!sun.up) return;
 
-  const az = sun.az * Math.PI/180;
-  const MPD = 111320, latC = Math.cos(32.07 * Math.PI/180);
-  const dLat = -Math.cos(az) * sun.len / MPD;
-  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
-
+  // Always draw building footprints so they're clickable even at night
   buildings.forEach(b => {
     const resolved = resolveBuildingHeight(b);
-    const h = resolved.h;
-    const sdLat = dLat * h;
-    const sdLon = dLon * h;
-
-    const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
-    L.polygon(sp, {
-      fillColor: '#000',
-      fillOpacity: Math.min(0.50, 0.15 + (h/55)*0.35),
-      color: 'transparent',
-      interactive: false
-    }).addTo(shadowLyr);
-
-    const srcColor = resolved.src === 'manual' ? '#60a5fa'
-                    : resolved.src === 'gis' ? '#86efac' : '#fbbf24';
+    const isManual = resolved.src === 'manual';
     L.polygon(b.poly, {
-      fillColor: srcColor,
-      fillOpacity: 0.08,
-      color: srcColor,
-      weight: 0.8,
+      fillColor: isManual ? '#2563eb' : '#0ea5e9',
+      fillOpacity: 0.15,
+      color: isManual ? '#1d4ed8' : '#0284c7',
+      weight: 0.7,
       opacity: 0.55,
     })
       .bindTooltip(
         `<b>${b.addr || 'Building #' + b.id}</b><br>` +
-        `Height: <b>${Math.round(h)}m</b><br>` +
-        `Source: <b style="color:${srcColor}">${resolved.src.toUpperCase()}</b><br>` +
+        `Height: <b>${Math.round(resolved.h)} m</b> · ${resolved.floors || Math.round(resolved.h/FLOOR_M)} floors<br>` +
+        `Source: <b>${resolved.src.toUpperCase()}</b><br>` +
         `<span style="opacity:0.6">${resolved.notes || ''}</span><br>` +
-        `<span style="opacity:0.5; font-size:10px;">Click to edit floors</span>`,
+        `<span style="opacity:0.5; font-size:10px;">Click to set floors</span>`,
         { className: 'route-tt', sticky: true }
       )
       .on('click', () => openBuildingEditor(b))
       .addTo(shadowLyr);
+  });
+
+  if (!sun.up) return;
+
+  const az = sun.az * Math.PI/180;
+  const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI/180);
+  const dLat = -Math.cos(az) * sun.len / MPD;
+  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+
+  buildings.forEach(b => {
+    const h = resolveBuildingHeight(b).h;
+    const sdLat = dLat * h, sdLon = dLon * h;
+    const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+    L.polygon(sp, {
+      fillColor: '#0b0f19',
+      fillOpacity: Math.min(0.55, 0.25 + (h/55)*0.30),
+      color: 'transparent',
+      interactive: false
+    }).addTo(shadowLyr);
+  });
+
+  // Current tree-canopy shadows too
+  const canopies = getTreeCanopies(6);
+  canopies.forEach(t => {
+    const dens = DENSITY_OPACITY[t.blk.density] || 0.4;
+    const hb = t.blk.h >= 12 ? 1 : t.blk.h >= 9 ? 0.85 : 0.65;
+    const sdLat = dLat * t.blk.h, sdLon = dLon * t.blk.h;
+    const sp = [...t.poly, ...t.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+    L.polygon(sp, {
+      fillColor: '#14532d',
+      fillOpacity: Math.min(0.45, 0.18 + 0.30 * dens * hb),
+      color: 'transparent',
+      interactive: false
+    }).addTo(shadowLyr);
   });
 }
 
@@ -888,123 +888,87 @@ function drawPOIs() {
 
 /* ══════════════════════════════════════════════════════════
    DYNAMIC SUN-PATH SHADOW ENGINE
-   For every 10-min step from sunrise to sunset, projects each
-   building's footprint along the solar vector and tests whether
-   each walkway sample point falls inside the resulting shadow
-   polygon. Trees contribute fractional shade per sample based
-   on the block's density and canopy height.
+   For every 10-min step from sunrise to sunset:
+     1. Compute solar vector (date, lat, lon, TZ, DST).
+     2. Project each 3D extrusion (building footprint + height,
+        tree canopy strip + height) along the sun direction →
+        cast-shadow polygon = footprint U translated footprint.
+     3. Stack each polygon onto the canvas with very low alpha.
+   The stack of 60–80 timesteps naturally produces a shadow-
+   duration heatmap: places shaded all day end up nearly opaque,
+   places shaded only briefly stay light.
    ══════════════════════════════════════════════════════════ */
-function sampleWalkway(stepM = 5) {
+
+/* Build a per-block tree-canopy polygon as a buffered strip along
+   the median centreline, between two consecutive crossings. */
+function getTreeCanopies(widthM = 6) {
+  const blocks = getTreeBlocks();
   const MPD = 111320;
-  const samples = [];
-  for (let i = 0; i < WALK_PATH.length - 1; i++) {
-    const a = WALK_PATH[i], b = WALK_PATH[i+1];
-    const dLat = b[0]-a[0], dLon = b[1]-a[1];
-    const latC = Math.cos(a[0] * Math.PI/180);
-    const distM = Math.hypot(dLat * MPD, dLon * MPD * latC);
-    const n = Math.max(1, Math.ceil(distM / stepM));
-    for (let s = 0; s < n; s++) {
-      const t = s / n;
-      samples.push({
-        lat: a[0] + dLat*t, lon: a[1] + dLon*t,
-        nodeIdx: i + t,
-        shadeSum: 0, daylightSteps: 0
-      });
+  const latC = Math.cos(TLV_LAT * Math.PI/180);
+  const out = [];
+  for (const blk of blocks) {
+    const pts = CENTRELINE.slice(blk.startIdx, blk.endIdx + 1);
+    if (pts.length < 2) continue;
+    const left = [], right = [];
+    for (let i = 0; i < pts.length; i++) {
+      const prev = pts[Math.max(0, i-1)];
+      const next = pts[Math.min(pts.length-1, i+1)];
+      const dN = (next[0] - prev[0]) * MPD;
+      const dE = (next[1] - prev[1]) * MPD * latC;
+      const bearing = Math.atan2(dE, dN);
+      const perpL = bearing - Math.PI / 2;
+      const dLat = (Math.cos(perpL) * widthM / 2) / MPD;
+      const dLon = (Math.sin(perpL) * widthM / 2) / (MPD * latC);
+      left.push([pts[i][0] + dLat, pts[i][1] + dLon]);
+      right.push([pts[i][0] - dLat, pts[i][1] - dLon]);
     }
+    out.push({ blk, poly: [...left, ...right.reverse()] });
   }
-  const last = WALK_PATH[WALK_PATH.length-1];
-  samples.push({
-    lat: last[0], lon: last[1], nodeIdx: WALK_PATH.length-1,
-    shadeSum: 0, daylightSteps: 0
-  });
-  return samples;
+  return out;
 }
 
-function computeShadowMap(date) {
-  const samples = sampleWalkway(5);
+/* Accumulated-shadow render. Draws into heatmapLyr using a canvas
+   renderer so thousands of low-alpha polygons stay performant. */
+function renderAccumulatedShadows(date) {
+  heatmapLyr.clearLayers();
+  if (!buildings.length) return;
+
   const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI/180);
+  const renderer = L.canvas({ padding: 0.5 });
+  const canopies = getTreeCanopies(6);
+  const buildingsR = buildings.map(b => ({
+    poly: b.poly, h: resolveBuildingHeight(b).h
+  }));
 
-  // Bounding box of the walkway for cheap "nearby" filter (~120 m halo)
-  const lats = samples.map(s => s.lat), lons = samples.map(s => s.lon);
-  const minLat = Math.min(...lats) - 0.0011;
-  const maxLat = Math.max(...lats) + 0.0011;
-  const minLon = Math.min(...lons) - 0.0013;
-  const maxLon = Math.max(...lons) + 0.0013;
-  const nearby = buildings.filter(b => {
-    const c = b.centroid;
-    return c[0] >= minLat && c[0] <= maxLat && c[1] >= minLon && c[1] <= maxLon;
-  });
-
-  const blocks = getTreeBlocks();
-  const sampleBlock = samples.map(s =>
-    blocks.find(b => s.nodeIdx >= b.startIdx && s.nodeIdx <= b.endIdx) || null
-  );
-
-  // 10 minutes = 1/6 hour
-  for (let h = 4; h <= 21; h += 1/6) {
+  // 10-min steps; skip when sun is below ~3° to avoid runaway shadow lengths.
+  for (let h = 5; h <= 20; h += 1/6) {
     const sun = getSun(date, h);
-    if (!sun.up) continue;
+    if (!sun.up || sun.alt < 3) continue;
 
-    const az = sun.az * Math.PI/180;
+    const az = sun.az * Math.PI / 180;
     const dLatRate = -Math.cos(az) * sun.len / MPD;
     const dLonRate =  Math.sin(az) * sun.len / (MPD * latC);
 
-    const shadowPolys = nearby.map(b => {
-      const hh = resolveBuildingHeight(b).h;
-      const sdLat = dLatRate * hh, sdLon = dLonRate * hh;
-      return [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
-    });
-
-    for (let i = 0; i < samples.length; i++) {
-      const s = samples[i];
-      s.daylightSteps++;
-      const pt = [s.lat, s.lon];
-
-      let bldgShaded = false;
-      for (const poly of shadowPolys) {
-        if (pointInPolygon(pt, poly)) { bldgShaded = true; break; }
-      }
-
-      let treeFrac = 0;
-      const blk = sampleBlock[i];
-      if (blk && sun.alt > 6) {
-        const op = DENSITY_OPACITY[blk.density] || 0.4;
-        const hb = blk.h >= 12 ? 1 : blk.h >= 9 ? 0.85 : 0.65;
-        treeFrac = op * hb;
-      }
-
-      s.shadeSum += bldgShaded ? 1 : treeFrac;
+    for (const b of buildingsR) {
+      const sdLat = dLatRate * b.h, sdLon = dLonRate * b.h;
+      const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+      L.polygon(sp, {
+        renderer, fillColor: '#0b0f19', fillOpacity: 0.035,
+        color: 'transparent', interactive: false
+      }).addTo(heatmapLyr);
     }
-  }
 
-  return samples.map(s => ({
-    ...s,
-    shadedFrac: s.daylightSteps > 0 ? s.shadeSum / s.daylightSteps : 0,
-    shadedMinutes: Math.round(s.shadeSum * 10),
-    daylightMinutes: s.daylightSteps * 10,
-  }));
-}
-
-function drawHeatmap(samples) {
-  heatmapLyr.clearLayers();
-  if (!samples) samples = shadowSamples;
-  if (!samples || samples.length < 2) return;
-
-  for (let i = 0; i < samples.length - 1; i++) {
-    const a = samples[i], b = samples[i+1];
-    const frac = (a.shadedFrac + b.shadedFrac) / 2;
-    const color = shadeToColor(frac);
-    L.polyline([[a.lat, a.lon], [b.lat, b.lon]], {
-      color, weight: 14, opacity: 0.88,
-      lineCap: 'butt'
-    })
-    .bindTooltip(
-      `Avg shade: <b>${Math.round(frac*100)}%</b><br>` +
-      `~${Math.round((a.shadedMinutes + b.shadedMinutes)/2)} min of ` +
-      `${Math.round((a.daylightMinutes + b.daylightMinutes)/2)} min daylight`,
-      { className: 'route-tt', sticky: true }
-    )
-    .addTo(heatmapLyr);
+    for (const t of canopies) {
+      const dens = DENSITY_OPACITY[t.blk.density] || 0.4;
+      const hb = t.blk.h >= 12 ? 1 : t.blk.h >= 9 ? 0.85 : 0.65;
+      const sdLat = dLatRate * t.blk.h, sdLon = dLonRate * t.blk.h;
+      const sp = [...t.poly, ...t.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+      L.polygon(sp, {
+        renderer, fillColor: '#14532d',
+        fillOpacity: 0.035 * dens * hb,
+        color: 'transparent', interactive: false
+      }).addTo(heatmapLyr);
+    }
   }
 }
 
@@ -1099,93 +1063,27 @@ async function loadGISHeights() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   LOAD BUILDINGS from Overpass, then spatial-match to GIS.
-   Per-building heights only — no plot/block fallback.
+   LOAD BUILDINGS — Tel Aviv GIS only.
+   Each GIS feature becomes one building. No OSM, no plot fallback.
    ══════════════════════════════════════════════════════════ */
 async function loadBuildings() {
-  const q = `[out:json][timeout:30];(way["building"](32.053,34.765,32.074,34.782););out geom;`;
-
-  const overpassP = fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'data=' + encodeURIComponent(q)
-  }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-
   try {
-    const [osmData, gisFeatures] = await Promise.all([overpassP, loadGISHeights()]);
-
-    // Pre-compute GIS centroids for fast matching
-    const gisIndexed = gisFeatures.map(f => ({
-      ...f,
-      _centroid: polyCentroid(f.poly)
+    const gisFeatures = await loadGISHeights();
+    buildings = gisFeatures.map((f, i) => ({
+      id: f.osmId || `gis-${i}`,
+      poly: f.poly,
+      centroid: polyCentroid(f.poly),
+      h: f.h,
+      src: 'gis',
+      notes: f.notes || `TLV GIS grade ${f.k_gova}`,
+      addr: null,
     }));
-
-    const matched = osmData.elements
-      .filter(e => e.type === 'way' && e.geometry && e.geometry.length > 2)
-      .map(e => {
-        const poly = e.geometry.map(p => [p.lat, p.lon]);
-        const centroid = polyCentroid(poly);
-        const tags = e.tags || {};
-
-        // 1) Try GIS spatial match — OSM centroid inside GIS polygon,
-        //    or GIS centroid inside OSM polygon. Either confirms a 1:1 tie.
-        let gisMatch = null;
-        for (const f of gisIndexed) {
-          if (pointInPolygon(centroid, f.poly) || pointInPolygon(f._centroid, poly)) {
-            gisMatch = f;
-            break;
-          }
-        }
-        if (gisMatch) {
-          return {
-            id: e.id, poly, centroid,
-            h: gisMatch.h,
-            src: 'gis',
-            notes: gisMatch.notes || `TLV GIS grade ${gisMatch.k_gova}`,
-            addr: tags['addr:housenumber']
-              ? `Rothschild ${tags['addr:housenumber']}`
-              : (tags.name || null)
-          };
-        }
-
-        // 2) Try OSM explicit per-building tags
-        const osmH = tags.height
-          ? parseFloat(tags.height)
-          : tags['building:levels']
-            ? parseFloat(tags['building:levels']) * 3.2
-            : null;
-        if (osmH) {
-          return {
-            id: e.id, poly, centroid,
-            h: osmH,
-            src: 'osm',
-            notes: tags.height
-              ? `OSM height=${tags.height}m`
-              : `OSM ${tags['building:levels']} floors × 3.2m`,
-            addr: tags['addr:housenumber']
-              ? `Rothschild ${tags['addr:housenumber']}`
-              : (tags.name || null)
-          };
-        }
-
-        // 3) No per-building height — skip (plot fallback removed).
-        return null;
-      })
-      .filter(Boolean);
-
-    buildings = matched;
-    sourceCounts = {
-      gis: buildings.filter(b => b.src === 'gis').length,
-      osm: buildings.filter(b => b.src === 'osm').length,
-    };
-
     updateBuildingStats();
     hideLoading();
     updateAll();
-
-  } catch(err) {
+  } catch (err) {
     console.error('Building load failed:', err);
-    gisStatus = gisStatus === 'pending' ? 'offline' : gisStatus;
+    buildings = [];
     updateBuildingStats();
     hideLoading();
     updateAll();
@@ -1193,30 +1091,24 @@ async function loadBuildings() {
 }
 
 function updateBuildingStats() {
-  const el = document.getElementById('st-bld');
-  el.textContent = buildings.length || '0';
+  document.getElementById('st-bld').textContent = buildings.length || '0';
 
   const sub = document.getElementById('st-bld-sub');
   if (sub) {
-    if (buildings.length === 0) {
-      sub.textContent = gisStatus === 'offline'
-        ? 'GIS offline · OSM-tagged only'
-        : 'none';
-    } else {
-      sub.textContent = `${sourceCounts.gis} GIS · ${sourceCounts.osm} OSM`;
-    }
+    sub.textContent = buildings.length === 0
+      ? (gisStatus === 'offline' ? 'GIS offline — run proxy.py' : '…')
+      : `${buildings.length} from TLV GIS`;
   }
-
   const badge = document.getElementById('gis-badge');
   if (badge) {
     badge.textContent = gisStatus === 'ok'
       ? '● GIS connected'
       : gisStatus === 'offline'
-        ? '○ GIS offline'
+        ? '○ GIS offline — start proxy.py'
         : '… GIS connecting';
     badge.style.color = gisStatus === 'ok'
-      ? '#86efac'
-      : gisStatus === 'offline' ? '#f87171' : 'rgba(255,255,255,0.5)';
+      ? '#16a34a'
+      : gisStatus === 'offline' ? '#dc2626' : 'rgba(0,0,0,0.5)';
   }
 }
 
@@ -1242,8 +1134,8 @@ document.querySelectorAll('.sb').forEach(b => {
     b.classList.add('on');
     currentDate = seasonToDate(b.dataset.s);
     document.getElementById('date-pick').value = dateToISO(currentDate);
-    shadowSamples = null;
-    if (heatmapVisible) drawHeatmap(null);
+    heatmapBuiltForDate = null;
+    if (heatmapVisible) runHeatmap();
     updateAll();
   });
 });
@@ -1384,32 +1276,32 @@ document.getElementById('tree-ed-close').addEventListener('click', () => {
 /* ══════════════════════════════════════════════════════════
    HEATMAP — toggle + compute
    ══════════════════════════════════════════════════════════ */
-document.getElementById('run-heatmap').addEventListener('click', async () => {
+let heatmapBuiltForDate = null;
+
+async function runHeatmap() {
   document.getElementById('compute-overlay').style.display = 'flex';
   await new Promise(r => setTimeout(r, 30));
   try {
-    shadowSamples = computeShadowMap(currentDate);
+    renderAccumulatedShadows(currentDate);
+    heatmapBuiltForDate = currentDate.getTime();
     heatmapVisible = true;
-    document.getElementById('toggle-heatmap').classList.remove('off');
-    document.getElementById('toggle-heatmap').classList.add('on');
+    const btn = document.getElementById('toggle-heatmap');
+    btn.classList.remove('off'); btn.classList.add('on');
     if (!map.hasLayer(heatmapLyr)) heatmapLyr.addTo(map);
-    drawHeatmap(shadowSamples);
   } finally {
     document.getElementById('compute-overlay').style.display = 'none';
   }
-});
+}
+document.getElementById('run-heatmap').addEventListener('click', runHeatmap);
+
 document.getElementById('toggle-heatmap').addEventListener('click', () => {
   heatmapVisible = !heatmapVisible;
   const btn = document.getElementById('toggle-heatmap');
   btn.classList.toggle('on', heatmapVisible);
   btn.classList.toggle('off', !heatmapVisible);
   if (heatmapVisible) {
-    if (!shadowSamples) {
-      document.getElementById('run-heatmap').click();
-      return;
-    }
+    if (heatmapBuiltForDate !== currentDate.getTime()) { runHeatmap(); return; }
     if (!map.hasLayer(heatmapLyr)) heatmapLyr.addTo(map);
-    drawHeatmap(shadowSamples);
   } else {
     if (map.hasLayer(heatmapLyr)) map.removeLayer(heatmapLyr);
   }
