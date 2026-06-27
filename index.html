@@ -384,8 +384,9 @@ function getTreeBlocks() {
 function resolveBuildingHeight(b) {
   const ovr = buildingOverrides[b.id];
   if (ovr) return { h: ovr.h, src: 'manual', floors: ovr.floors,
-                    notes: `Manual: ${ovr.floors} floors × ${FLOOR_M}m` };
-  return { h: b.h, src: 'gis', floors: Math.round(b.h / FLOOR_M), notes: b.notes };
+                    notes: `${ovr.floors} floors × ${FLOOR_M}m = ${ovr.h}m` };
+  return { h: b.h, src: 'default', floors: Math.round(b.h / FLOOR_M),
+           notes: `Default — not yet set` };
 }
 
 /* ───── Map ───── */
@@ -405,26 +406,41 @@ function initMap() {
   heatmapLyr   = L.layerGroup();
 }
 
-/* ───── GIS load ───── */
+/* ───── Footprints from OpenStreetMap (Overpass) ─────
+   We use OSM ONLY for the polygon outlines of buildings near
+   Rothschild. Heights are NOT taken from OSM — every building
+   defaults to a placeholder height until the user sets floors
+   via the slider. */
+const DEFAULT_FLOORS = 4;            // 4 floors × 4 m = 16 m starting point
+const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
+
 async function loadBuildings() {
   setStatus('pending');
+  const q = `[out:json][timeout:25];(way["building"](${ROTHSCHILD_BBOX}););out geom;`;
   try {
-    const r = await fetch(`${GIS_PROXY}/heights`, { signal: AbortSignal.timeout(10000) });
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q),
+      signal: AbortSignal.timeout(30000),
+    });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    if (!Array.isArray(data)) throw new Error('bad response');
-    buildings = data
-      .filter(f => f.h && f.poly && f.poly.length >= 3)
-      .map((f, i) => ({
-        id: f.osmId != null ? `gis-${f.osmId}` : `gis-${i}`,
-        poly: f.poly,
-        centroid: polyCentroid(f.poly),
-        h: f.h,
-        notes: f.notes || `TLV GIS grade ${f.k_gova}`,
-      }));
+    buildings = (data.elements || [])
+      .filter(e => e.type === 'way' && e.geometry && e.geometry.length >= 3)
+      .map(e => {
+        const poly = e.geometry.map(p => [p.lat, p.lon]);
+        return {
+          id: `osm-${e.id}`,
+          poly,
+          centroid: polyCentroid(poly),
+          h: DEFAULT_FLOORS * FLOOR_M,
+          notes: `Default: ${DEFAULT_FLOORS} floors. Click to edit.`,
+        };
+      });
     setStatus('ok');
   } catch (err) {
-    console.warn('GIS load failed:', err);
+    console.warn('Footprint load failed:', err);
     buildings = [];
     setStatus('offline');
   }
@@ -436,19 +452,19 @@ async function loadBuildings() {
 function setStatus(s) {
   const txt = document.getElementById('gis-text');
   const dot = document.getElementById('gis-dot');
+  const edited = Object.keys(buildingOverrides).length;
   if (s === 'ok') {
-    txt.innerHTML = `<b>TLV GIS connected</b> · ${buildings.length} buildings`;
+    txt.innerHTML = `<b>${buildings.length} buildings</b> loaded · click any to set floors`;
     dot.style.background = '#16a34a';
   } else if (s === 'offline') {
-    txt.innerHTML = `<b>GIS offline.</b> Start <code>proxy.py</code> on localhost:5001.`;
+    txt.innerHTML = `<b>Failed to load building footprints.</b> Check your internet connection.`;
     dot.style.background = '#dc2626';
   } else {
-    txt.textContent = 'Connecting to TLV GIS…';
+    txt.textContent = 'Loading building footprints…';
     dot.style.background = '#9ca3af';
   }
-  const editedCount = Object.keys(buildingOverrides).length;
   document.getElementById('bld-count').textContent =
-    editedCount ? `${editedCount} buildings manually edited` : '';
+    edited ? `${edited} edited so far` : '';
 }
 
 /* ───── Footprints (always clickable) ───── */
@@ -462,11 +478,10 @@ function drawFootprints() {
       color: c, weight: 1, opacity: 0.6,
     })
       .bindTooltip(
-        `<b>Building #${String(b.id).replace('gis-','')}</b><br>` +
-        `Height: <b>${Math.round(r.h)} m</b> · ${r.floors} floors<br>` +
-        `Source: <b>${r.src.toUpperCase()}</b><br>` +
-        `<span style="opacity:0.6">${r.notes || ''}</span><br>` +
-        `<span style="opacity:0.5; font-size:10px;">Click to set floors</span>`,
+        `<b>Building</b><br>` +
+        `${r.floors} floors · <b>${Math.round(r.h)} m</b>` +
+        (r.src === 'manual' ? ' <span style="color:#2563eb">(edited)</span>' : ' <span style="opacity:0.6">(default)</span>') +
+        `<br><span style="opacity:0.5; font-size:10px;">Click to set floors</span>`,
         { sticky: true }
       )
       .on('click', () => openBldEditor(b))
