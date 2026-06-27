@@ -466,10 +466,7 @@ function getTreeBlocks() {
 /* Tree centres evenly spaced along the block — TWO rows, one on each
    side of the centreline, offset perpendicular to the boulevard
    bearing by ~ROW_OFFSET_M. */
-/* The polyline IS the median centreline (built from CROSSINGS).
-   Tree rows are symmetric ±ROW_OFFSET_M from it, on the two median
-   edges. Rothschild's central strip is ~12-15 m wide. */
-const ROW_OFFSET_M = 6;
+/* Single row of trees right on the polyline (median centreline). */
 
 /* Distance in metres between two [lat, lon] points. */
 function distM(a, b) {
@@ -504,16 +501,11 @@ function placeTreesAlongSegment(segment, spacing) {
     const dE = (p2[1] - p1[1]) * MPD * latC;
     const segLen = Math.hypot(dN, dE);
     if (segLen < 0.001) continue;
-    const bearing = Math.atan2(dE, dN);
-    const perp = bearing - Math.PI / 2;
-    const offLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
-    const offLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
     while (nextAt <= accum + segLen) {
       const t = (nextAt - accum) / segLen;
       const cx = p1[0] + (p2[0] - p1[0]) * t;
       const cy = p1[1] + (p2[1] - p1[1]) * t;
-      positions.push([cx + offLat, cy + offLon]);
-      positions.push([cx - offLat, cy - offLon]);
+      positions.push([cx, cy]);
       nextAt += spacing;
     }
     accum += segLen;
