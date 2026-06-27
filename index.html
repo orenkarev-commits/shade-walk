@@ -262,16 +262,32 @@ const TLV_LAT = 32.07, TLV_LON = 34.78;
 const FLOOR_M = 4;
 const GIS_PROXY = 'http://localhost:5001';
 
-/* Known tall towers on Rothschild — used to pre-populate manual
-   heights/floors on first load. Lat/lon are approximate; we match
-   to the nearest OSM footprint within MATCH_RADIUS_M. */
+/* Building heights along Rothschild Boulevard, keyed by street number.
+   Source: provided by the user. Matched to OSM footprints via the
+   addr:housenumber + addr:street tags during loadBuildings(). */
+const ROTHSCHILD_HEIGHTS = {
+  '1':  120.2,
+  '2':   12,  '4':   12,  '6':   12,  '8':   13,  '10':  13,
+  '12':  13,  '14':  13,  '16':  13,  '18':  16,  '20':  16,
+  '22': 126.9,'24':  18,  '26':  18,  '28':  18,  '30': 102,
+  '32':  22,  '34':  22,  '36': 158,  '38':  18,  '40':  18,
+  '42': 132,  '44':  18,  '46':  20,  '48':  18,  '50':  18,
+  '52':  18,  '54':  20,  '56': 126.9,'58':  18,  '60':  18,
+  '62':  18,  '64':  18,  '66':  18,  '68':  18,  '70':  18,
+  '72':  18,  '74':  18,  '76':  18,  '78':  18,  '80':  18,
+  '82':  18,  '84':  18,  '86':  18,  '88':  18,  '90':  18,
+  '92':  18,  '94':  18,  '96':  18,  '98':  18, '100':  18,
+  '102': 18, '104':  18, '106':  18, '108':  18, '110':  18,
+  '112': 18, '114':  18, '116':  18, '118':  18, '120':  18,
+  '122': 18, '124':  18, '126':  18, '128':  18, '130':  18,
+  '132': 18, '134':  18, '136':  18, '138':  18,
+};
+
+/* Special tower at 46 Rothschild — distinct from the lower building
+   at the same address. Matched by lat/lon since it shares an address. */
 const MATCH_RADIUS_M = 50;
 const LANDMARK_TOWERS = [
-  { name: 'Meier on Rothschild',              addr: '36 Rothschild', lat: 32.06657, lon: 34.77545, floors: 42, h: 158 },
-  { name: 'First International Bank Tower',   addr: '42 Rothschild', lat: 32.06520, lon: 34.77470, floors: 32, h: 132 },
-  { name: 'Rothschild 22 Tower',              addr: '22 Rothschild', lat: 32.06830, lon: 34.77650, floors: 29, h: 127 },
-  { name: 'Aviv Rothschild Tower',            addr: '56 Rothschild', lat: 32.06350, lon: 34.77380, floors: 30, h: 125 },
-  { name: '1 Rothschild Boulevard',           addr: '1 Rothschild',  lat: 32.07100, lon: 34.77780, floors: 34, h: 125 },
+  { name: '46 Rothschild Tower', addr: '46 Rothschild', lat: 32.06440, lon: 34.77410, floors: 25, h: 93 },
 ];
 
 /* Cross-streets on Rothschild, north → south.
@@ -293,14 +309,27 @@ const CROSSINGS = [
   { name: 'Neve Tzedek', lat: 32.05750, lon: 34.77035 },
 ];
 
-const DENSITY_FACTOR  = { sparse: 0.32, medium: 0.55, dense: 0.85 };
-const TREE_SPACING_M  = { sparse: 18,    medium: 10,    dense: 6   }; // metres between trees
+const DENSITY_FACTOR  = { none: 0,        sparse: 0.32, medium: 0.55, dense: 0.85 };
+const TREE_SPACING_M  = { none: Infinity, sparse: 20,   medium: 12,   dense: 8   };
 const DENSITY_TIP = {
+  none:   'No trees on this block',
   sparse: 'Canopy covers ~30% of the walkway',
   medium: 'Canopy covers ~50% of the walkway',
   dense:  'Canopy covers most of the walkway',
 };
-const BLOCK_DEFAULTS = { density: 'medium', h: 12, canopy: 6 };
+/* Real Rothschild ficus: ~14–18 m tall, 10–14 m canopy diameter. */
+const BLOCK_DEFAULTS = { density: 'dense', h: 16, canopy: 12 };
+
+/* Block-specific overrides applied when the user hasn't edited that
+   block yet. Captures the qualitative notes from the brief:
+   - Habima end: trimmed, narrow canopy
+   - One block has no trees
+   - Herzl → Ahad Ha'am: sparse */
+const BLOCK_PRESETS = {
+  'Habima→Marmorek':    { density: 'medium', h: 16, canopy: 4 },   // tall + trimmed narrow
+  'Sheinkin→Allenby':   { density: 'none' },                       // no trees
+  "Herzl→Ahad Ha'am":   { density: 'sparse', h: 12, canopy: 8 },   // very sparse
+};
 
 const KEY_BLD  = 'shade-walk:v2:buildings';
 const KEY_TREE = 'shade-walk:v2:trees';
@@ -413,13 +442,15 @@ function getTreeBlocks() {
   for (let i = 0; i < CROSSINGS.length - 1; i++) {
     const a = CROSSINGS[i], b = CROSSINGS[i+1];
     const key = `${a.name}→${b.name}`;
+    const preset = BLOCK_PRESETS[key] || {};
+    const dflt = { ...BLOCK_DEFAULTS, ...preset };
     const ovr = treeOverrides[key] || {};
     out.push({
       key,
       label: `${a.name} → ${b.name}`,
-      density: ovr.density || BLOCK_DEFAULTS.density,
-      h:       ovr.h      != null ? ovr.h      : BLOCK_DEFAULTS.h,
-      canopy:  ovr.canopy != null ? ovr.canopy : BLOCK_DEFAULTS.canopy,
+      density: ovr.density || dflt.density,
+      h:       ovr.h      != null ? ovr.h      : dflt.h,
+      canopy:  ovr.canopy != null ? ovr.canopy : dflt.canopy,
       override: !!treeOverrides[key],
       a, b,
     });
@@ -433,6 +464,7 @@ function getTreeBlocks() {
 const ROW_OFFSET_M = 6; // distance from centreline to each tree row
 
 function getTreePositions(blk) {
+  if (blk.density === 'none') return [];
   const MPD = 111320;
   const latC = Math.cos(TLV_LAT * Math.PI / 180);
   const dN = (blk.b.lat - blk.a.lat) * MPD;
@@ -442,15 +474,16 @@ function getTreePositions(blk) {
   const perp = bearing - Math.PI / 2;
   const dLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
   const dLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
-  const spacing = TREE_SPACING_M[blk.density] || 10;
+  const spacing = TREE_SPACING_M[blk.density] || 12;
+  if (!isFinite(spacing)) return [];
   const n = Math.max(1, Math.floor(lengthM / spacing));
   const positions = [];
   for (let i = 0; i < n; i++) {
     const t = (i + 0.5) / n;
     const cx = blk.a.lat + (blk.b.lat - blk.a.lat) * t;
     const cy = blk.a.lon + (blk.b.lon - blk.a.lon) * t;
-    positions.push([cx + dLat, cy + dLon]); // left row
-    positions.push([cx - dLat, cy - dLon]); // right row
+    positions.push([cx + dLat, cy + dLon]);
+    positions.push([cx - dLat, cy - dLon]);
   }
   return positions;
 }
@@ -501,9 +534,9 @@ function drawTreeCanopies() {
   treeLyr.clearLayers();
   getTreeBlocks().forEach(blk => {
     getTreePositions(blk).forEach(pos => {
-      L.polygon(circlePolygon(pos, blk.canopy / 2, 14), {
-        fillColor: '#16a34a', fillOpacity: 0.55,
-        color: '#166534', weight: 0.8, opacity: 0.7,
+      L.polygon(circlePolygon(pos, blk.canopy / 2, 16), {
+        fillColor: '#16a34a', fillOpacity: 0.7,
+        color: '#14532d', weight: 1, opacity: 0.85,
         interactive: false
       }).addTo(treeLyr);
     });
@@ -534,14 +567,18 @@ async function loadBuildings() {
       .filter(e => e.type === 'way' && e.geometry && e.geometry.length >= 3)
       .map(e => {
         const poly = e.geometry.map(p => [p.lat, p.lon]);
+        const tags = e.tags || {};
         return {
           id: `osm-${e.id}`,
           poly,
           centroid: polyCentroid(poly),
           h: DEFAULT_FLOORS * FLOOR_M,
           notes: `Default: ${DEFAULT_FLOORS} floors. Click to edit.`,
+          addrStreet: tags['addr:street'] || '',
+          addrNumber: tags['addr:housenumber'] || '',
         };
       });
+    applyRothschildPresets();
     applyLandmarkTowers();
     setStatus('ok');
   } catch (err) {
@@ -553,6 +590,32 @@ async function loadBuildings() {
   drawTreeCanopies();
   updateShadows();
   document.getElementById('loading').style.display = 'none';
+}
+
+/* Auto-populate Rothschild building heights by matching the
+   OSM addr:housenumber tag against the user-provided table. */
+function applyRothschildPresets() {
+  let matched = 0;
+  buildings.forEach(b => {
+    const street = b.addrStreet || '';
+    const isRothschild =
+      street.includes('רוטשילד') ||
+      street.toLowerCase().includes('rothschild');
+    if (!isRothschild) return;
+    const num = b.addrNumber;
+    const h = ROTHSCHILD_HEIGHTS[num];
+    if (h == null) return;
+    b.addr = `${num} Rothschild`;
+    const existing = buildingOverrides[b.id];
+    if (!existing || existing.preset) {
+      buildingOverrides[b.id] = {
+        h, floors: Math.round(h / FLOOR_M), preset: true,
+      };
+      matched++;
+    }
+  });
+  lsSave(KEY_BLD, buildingOverrides);
+  console.log(`Applied Rothschild presets to ${matched} buildings.`);
 }
 
 /* Match each landmark tower to the nearest OSM footprint by centroid
@@ -773,7 +836,7 @@ function renderTreeEditor() {
     <div class="tree-card" data-key="${blk.key}">
       <h4>${blk.label}${blk.override ? ' <span style="color:#16a34a;font-size:9px;font-weight:600;">EDITED</span>' : ''}</h4>
       <div class="density-row">
-        ${['sparse','medium','dense'].map(d => `
+        ${['none','sparse','medium','dense'].map(d => `
           <button data-d="${d}" class="${blk.density === d ? 'on' : ''}" title="${DENSITY_TIP[d]}">${d}</button>
         `).join('')}
       </div>
@@ -781,12 +844,12 @@ function renderTreeEditor() {
         <span>Tree height</span>
         <strong><span class="h-val">${blk.h}</span> m</strong>
       </div>
-      <input type="range" class="h-sl" min="4" max="18" step="1" value="${blk.h}">
+      <input type="range" class="h-sl" min="4" max="22" step="1" value="${blk.h}">
       <div class="h-readout" style="margin-top:8px;">
         <span>Canopy width</span>
         <strong><span class="c-val">${blk.canopy}</span> m</strong>
       </div>
-      <input type="range" class="c-sl" min="2" max="10" step="1" value="${blk.canopy}">
+      <input type="range" class="c-sl" min="2" max="16" step="1" value="${blk.canopy}">
     </div>
   `).join('');
 
