@@ -597,14 +597,10 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-/* Build the boulevard polyline from the CROSSINGS array. Reliable,
-   no OSM lookup that can land on the wrong tagged way. */
+/* Build the boulevard polyline from CROSSINGS — used internally for
+   tree placement. No visible line is drawn for it. */
 function buildBoulevard() {
   boulevardPolyline = CROSSINGS.map(c => [c.lat, c.lon]);
-  L.polyline(boulevardPolyline, {
-    color: '#6b7280', weight: 1.5, opacity: 0.5,
-    dashArray: '4,4', interactive: false,
-  }).addTo(map);
 }
 
 async function loadBuildings() {
