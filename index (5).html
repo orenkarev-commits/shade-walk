@@ -177,6 +177,7 @@
 <div id="sun-pos">
   <strong id="sp-time">8:00 am</strong>
   <span id="sp-detail">–</span>
+  <span id="gis-badge" style="display:block; font-size:10px; margin-top:6px; color:rgba(255,255,255,0.5);">… GIS connecting</span>
 </div>
 
 <!-- Bottom info card -->
@@ -195,6 +196,7 @@
     <div class="stat" style="padding-left:16px;">
       <div class="stat-n" id="st-bld">–</div>
       <div class="stat-l">Buildings</div>
+      <div class="stat-l" id="st-bld-sub" style="text-transform:none; letter-spacing:0; opacity:0.7;">–</div>
     </div>
     <div class="stat" style="padding-left:16px;">
       <div class="stat-n" id="st-sun">–</div>
@@ -362,6 +364,10 @@ function shadeToColor(shade) {
 let map, routeLyr, shadowLyr, treeLyr, poiLyr, crossLyr;
 let buildings = [];
 let hour = 8, season = 'summer';
+let gisStatus = 'pending'; // 'ok' | 'offline' | 'pending'
+let sourceCounts = { gis: 0, osm: 0 };
+
+const GIS_PROXY_URL = 'http://localhost:5001';
 
 /* ══════════════════════════════════════════════════════════
    INIT
@@ -520,11 +526,10 @@ function drawShadows(sun) {
   const dLon =  Math.sin(az) * sun.len / (MPD * latC);
 
   buildings.forEach(b => {
-    const h = b.h || 12;
+    const h = b.h;
     const sdLat = dLat * h;
     const sdLon = dLon * h;
 
-    // Shadow polygon
     const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
     L.polygon(sp, {
       fillColor: '#000',
@@ -532,6 +537,24 @@ function drawShadows(sun) {
       color: 'transparent',
       interactive: false
     }).addTo(shadowLyr);
+
+    // Per-building footprint with a tooltip — so you can see source + height
+    const srcColor = b.src === 'gis' ? '#86efac' : '#fbbf24';
+    L.polygon(b.poly, {
+      fillColor: srcColor,
+      fillOpacity: 0.08,
+      color: srcColor,
+      weight: 0.8,
+      opacity: 0.55,
+    })
+      .bindTooltip(
+        `<b>${b.addr || 'Building #' + b.id}</b><br>` +
+        `Height: <b>${Math.round(h)}m</b><br>` +
+        `Source: <b style="color:${srcColor}">${b.src.toUpperCase()}</b><br>` +
+        `<span style="opacity:0.6">${b.notes || ''}</span>`,
+        { className: 'route-tt', sticky: true }
+      )
+      .addTo(shadowLyr);
   });
 }
 
@@ -598,7 +621,7 @@ function updateAll() {
   document.getElementById('st-win').textContent = wins.length
     ? `${fmtH(wins[0])}–${fmtH(wins[wins.length-1])}`
     : 'Early AM';
-  document.getElementById('st-bld').textContent = buildings.length || '–';
+  updateBuildingStats();
   document.getElementById('st-sun').textContent = sun.up ? sun.alt + '°' : 'Set';
 
   // Tip
@@ -614,60 +637,169 @@ function updateAll() {
 }
 
 /* ══════════════════════════════════════════════════════════
-   LOAD BUILDINGS from Overpass (POST)
+   GEOMETRY HELPERS
    ══════════════════════════════════════════════════════════ */
-async function loadBuildings() {
-  // Tight bbox: just Rothschild + ~80m either side
-  const q = `[out:json][timeout:30];(way["building"](32.053,34.765,32.074,34.782););out geom;`;
+function polyCentroid(poly) {
+  const lats = poly.map(p=>p[0]), lons = poly.map(p=>p[1]);
+  return [
+    (Math.min(...lats)+Math.max(...lats))/2,
+    (Math.min(...lons)+Math.max(...lons))/2
+  ];
+}
+
+// Ray-casting point-in-polygon. point = [lat, lon], polygon = [[lat,lon], ...]
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  const x = point[1], y = point[0]; // x=lon, y=lat
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][1], yi = polygon[i][0];
+    const xj = polygon[j][1], yj = polygon[j][0];
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LOAD GIS HEIGHTS from local Flask proxy
+   Each feature has a per-parcel polygon + k_gova → metres.
+   ══════════════════════════════════════════════════════════ */
+async function loadGISHeights() {
   try {
-    const r = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q)
-    });
+    const r = await fetch(`${GIS_PROXY_URL}/heights`, { signal: AbortSignal.timeout(8000) });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
+    if (!Array.isArray(data)) throw new Error('bad response');
+    gisStatus = 'ok';
+    return data.filter(f => f.h && f.poly && f.poly.length > 2);
+  } catch (err) {
+    gisStatus = 'offline';
+    console.warn('GIS proxy unavailable — buildings will only render if OSM has explicit height tags.', err);
+    return [];
+  }
+}
 
-    buildings = data.elements
+/* ══════════════════════════════════════════════════════════
+   LOAD BUILDINGS from Overpass, then spatial-match to GIS.
+   Per-building heights only — no plot/block fallback.
+   ══════════════════════════════════════════════════════════ */
+async function loadBuildings() {
+  const q = `[out:json][timeout:30];(way["building"](32.053,34.765,32.074,34.782););out geom;`;
+
+  const overpassP = fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'data=' + encodeURIComponent(q)
+  }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+
+  try {
+    const [osmData, gisFeatures] = await Promise.all([overpassP, loadGISHeights()]);
+
+    // Pre-compute GIS centroids for fast matching
+    const gisIndexed = gisFeatures.map(f => ({
+      ...f,
+      _centroid: polyCentroid(f.poly)
+    }));
+
+    const matched = osmData.elements
       .filter(e => e.type === 'way' && e.geometry && e.geometry.length > 2)
       .map(e => {
         const poly = e.geometry.map(p => [p.lat, p.lon]);
-        const lats = poly.map(p=>p[0]), lons = poly.map(p=>p[1]);
-        const centroid = [
-          (Math.min(...lats)+Math.max(...lats))/2,
-          (Math.min(...lons)+Math.max(...lons))/2
-        ];
+        const centroid = polyCentroid(poly);
         const tags = e.tags || {};
-        const h = tags.height
+
+        // 1) Try GIS spatial match — OSM centroid inside GIS polygon,
+        //    or GIS centroid inside OSM polygon. Either confirms a 1:1 tie.
+        let gisMatch = null;
+        for (const f of gisIndexed) {
+          if (pointInPolygon(centroid, f.poly) || pointInPolygon(f._centroid, poly)) {
+            gisMatch = f;
+            break;
+          }
+        }
+        if (gisMatch) {
+          return {
+            id: e.id, poly, centroid,
+            h: gisMatch.h,
+            src: 'gis',
+            notes: gisMatch.notes || `TLV GIS grade ${gisMatch.k_gova}`,
+            addr: tags['addr:housenumber']
+              ? `Rothschild ${tags['addr:housenumber']}`
+              : (tags.name || null)
+          };
+        }
+
+        // 2) Try OSM explicit per-building tags
+        const osmH = tags.height
           ? parseFloat(tags.height)
           : tags['building:levels']
             ? parseFloat(tags['building:levels']) * 3.2
             : null;
+        if (osmH) {
+          return {
+            id: e.id, poly, centroid,
+            h: osmH,
+            src: 'osm',
+            notes: tags.height
+              ? `OSM height=${tags.height}m`
+              : `OSM ${tags['building:levels']} floors × 3.2m`,
+            addr: tags['addr:housenumber']
+              ? `Rothschild ${tags['addr:housenumber']}`
+              : (tags.name || null)
+          };
+        }
 
-        // Use block height estimate for missing heights
-        const blockH = getBlockH(centroid[0]);
-        return { id: e.id, poly, centroid, h: h || blockH };
-      });
+        // 3) No per-building height — skip (plot fallback removed).
+        return null;
+      })
+      .filter(Boolean);
 
-    document.getElementById('st-bld').textContent = buildings.length;
+    buildings = matched;
+    sourceCounts = {
+      gis: buildings.filter(b => b.src === 'gis').length,
+      osm: buildings.filter(b => b.src === 'osm').length,
+    };
+
+    updateBuildingStats();
     hideLoading();
     updateAll();
 
   } catch(err) {
+    console.error('Building load failed:', err);
+    gisStatus = gisStatus === 'pending' ? 'offline' : gisStatus;
+    updateBuildingStats();
     hideLoading();
     updateAll();
   }
 }
 
-function getBlockH(lat) {
-  const blocks = [
-    [32.0724,32.0710,18],[32.0710,32.0696,14],[32.0696,32.0680,16],
-    [32.0680,32.0662,12],[32.0662,32.0645,15],[32.0645,32.0625,14],
-    [32.0625,32.0605,12],[32.0605,32.0585,11],[32.0585,32.0562,10],
-    [32.0562,32.0540,9],
-  ];
-  for (const [n,s,h] of blocks) if (lat<=n && lat>=s) return h;
-  return 12;
+function updateBuildingStats() {
+  const el = document.getElementById('st-bld');
+  el.textContent = buildings.length || '0';
+
+  const sub = document.getElementById('st-bld-sub');
+  if (sub) {
+    if (buildings.length === 0) {
+      sub.textContent = gisStatus === 'offline'
+        ? 'GIS offline · OSM-tagged only'
+        : 'none';
+    } else {
+      sub.textContent = `${sourceCounts.gis} GIS · ${sourceCounts.osm} OSM`;
+    }
+  }
+
+  const badge = document.getElementById('gis-badge');
+  if (badge) {
+    badge.textContent = gisStatus === 'ok'
+      ? '● GIS connected'
+      : gisStatus === 'offline'
+        ? '○ GIS offline'
+        : '… GIS connecting';
+    badge.style.color = gisStatus === 'ok'
+      ? '#86efac'
+      : gisStatus === 'offline' ? '#f87171' : 'rgba(255,255,255,0.5)';
+  }
 }
 
 function hideLoading() {
