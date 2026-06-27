@@ -466,7 +466,7 @@ function getTreeBlocks() {
 /* Tree centres evenly spaced along the block — TWO rows, one on each
    side of the centreline, offset perpendicular to the boulevard
    bearing by ~ROW_OFFSET_M. */
-const ROW_OFFSET_M = 6; // distance from centreline to each tree row
+const ROW_OFFSET_M = 4; // distance from centreline to each tree row (median is ~15m wide)
 
 /* Distance in metres between two [lat, lon] points. */
 function distM(a, b) {
@@ -602,12 +602,14 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
 async function loadBoulevard() {
+  // Pull every Rothschild-named way with its tags so we can prefer
+  // the pedestrian/cycle median strip over the two car roads.
   const q = `[out:json][timeout:25];
     (
       way["highway"]["name"~"רוטשילד"](32.05,34.76,32.08,34.79);
       way["highway"]["name:en"~"Rothschild",i](32.05,34.76,32.08,34.79);
     );
-    out geom;`;
+    out tags geom;`;
   try {
     const r = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
@@ -617,10 +619,25 @@ async function loadBoulevard() {
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const data = await r.json();
-    const ways = (data.elements || [])
-      .filter(e => e.type === 'way' && e.geometry && e.geometry.length >= 2)
-      .map(e => e.geometry.map(p => [p.lat, p.lon]));
-    if (!ways.length) { console.warn('No Rothschild way found in OSM'); return; }
+    const allWays = (data.elements || []).filter(e =>
+      e.type === 'way' && e.geometry && e.geometry.length >= 2
+    );
+    if (!allWays.length) { console.warn('No Rothschild way found in OSM'); return; }
+
+    // What did OSM give us? Print so we can see if the median path is there.
+    console.log('Rothschild ways:',
+      allWays.map(w => ({ id: w.id, highway: w.tags?.highway, name: w.tags?.name, n: w.geometry.length }))
+    );
+
+    // Prefer the median pedestrian/cycle strip; only fall back to the
+    // car roads if no path-type way was named "Rothschild".
+    const PED_TYPES = new Set(['path', 'footway', 'cycleway', 'pedestrian', 'living_street', 'track']);
+    let chosen = allWays.filter(w => PED_TYPES.has(w.tags?.highway));
+    if (!chosen.length) {
+      console.warn('No pedestrian/cycle Rothschild way — using car-road centreline as fallback.');
+      chosen = allWays;
+    }
+    const ways = chosen.map(w => w.geometry.map(p => [p.lat, p.lon]));
 
     // Greedy chain: connect ways by closest endpoints
     let chained = ways[0].slice();
