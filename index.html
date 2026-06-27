@@ -342,8 +342,9 @@ const lsSave = (k, o) => localStorage.setItem(k, JSON.stringify(o));
 let buildingOverrides = lsLoad(KEY_BLD);
 let treeOverrides     = lsLoad(KEY_TREE);
 
-let map, footprintLyr, shadowLyr, heatmapLyr;
+let map, footprintLyr, shadowLyr, heatmapLyr, treeLyr;
 let buildings = [];
+let boulevardPolyline = null; // [[lat, lon], ...] — real OSM centreline
 let editingBuilding = null;
 let heatmapDate = null, heatmapOn = false;
 let currentDate = new Date();
@@ -467,29 +468,72 @@ function getTreeBlocks() {
    bearing by ~ROW_OFFSET_M. */
 const ROW_OFFSET_M = 6; // distance from centreline to each tree row
 
-function getTreePositions(blk) {
-  if (blk.density === 'none') return [];
+/* Distance in metres between two [lat, lon] points. */
+function distM(a, b) {
+  const dN = (a[0] - b[0]) * 111320;
+  const dE = (a[1] - b[1]) * 111320 * Math.cos(a[0] * Math.PI / 180);
+  return Math.hypot(dN, dE);
+}
+
+/* Index of the polyline vertex closest to (lat, lon). */
+function nearestPolylineIndex(poly, lat, lon) {
+  let bestI = 0, bestD = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const d = distM(poly[i], [lat, lon]);
+    if (d < bestD) { bestD = d; bestI = i; }
+  }
+  return bestI;
+}
+
+/* Walk along a polyline segment placing trees every `spacing` metres,
+   with perpendicular ±row offsets. Each pair = two rows. */
+function placeTreesAlongSegment(segment, spacing) {
+  if (!segment || segment.length < 2) return [];
   const MPD = 111320;
   const latC = Math.cos(TLV_LAT * Math.PI / 180);
-  const dN = (blk.b.lat - blk.a.lat) * MPD;
-  const dE = (blk.b.lon - blk.a.lon) * MPD * latC;
-  const lengthM = Math.hypot(dN, dE);
-  const bearing = Math.atan2(dE, dN);
-  const perp = bearing - Math.PI / 2;
-  const dLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
-  const dLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
-  const spacing = TREE_SPACING_M[blk.density] || 12;
-  if (!isFinite(spacing)) return [];
-  const n = Math.max(1, Math.floor(lengthM / spacing));
   const positions = [];
-  for (let i = 0; i < n; i++) {
-    const t = (i + 0.5) / n;
-    const cx = blk.a.lat + (blk.b.lat - blk.a.lat) * t;
-    const cy = blk.a.lon + (blk.b.lon - blk.a.lon) * t;
-    positions.push([cx + dLat, cy + dLon]);
-    positions.push([cx - dLat, cy - dLon]);
+  let accum = 0;
+  let nextAt = spacing / 2;
+  for (let i = 0; i < segment.length - 1; i++) {
+    const p1 = segment[i], p2 = segment[i + 1];
+    const dN = (p2[0] - p1[0]) * MPD;
+    const dE = (p2[1] - p1[1]) * MPD * latC;
+    const segLen = Math.hypot(dN, dE);
+    if (segLen < 0.001) continue;
+    const bearing = Math.atan2(dE, dN);
+    const perp = bearing - Math.PI / 2;
+    const offLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
+    const offLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
+    while (nextAt <= accum + segLen) {
+      const t = (nextAt - accum) / segLen;
+      const cx = p1[0] + (p2[0] - p1[0]) * t;
+      const cy = p1[1] + (p2[1] - p1[1]) * t;
+      positions.push([cx + offLat, cy + offLon]);
+      positions.push([cx - offLat, cy - offLon]);
+      nextAt += spacing;
+    }
+    accum += segLen;
   }
   return positions;
+}
+
+/* Tree positions for a block — walks the real boulevard polyline
+   between the two crossings' projected positions. Falls back to a
+   straight-line interpolation if the polyline hasn't loaded yet. */
+function getTreePositions(blk) {
+  if (blk.density === 'none') return [];
+  const spacing = TREE_SPACING_M[blk.density];
+  if (!isFinite(spacing)) return [];
+
+  if (boulevardPolyline && boulevardPolyline.length >= 2) {
+    const aIdx = nearestPolylineIndex(boulevardPolyline, blk.a.lat, blk.a.lon);
+    const bIdx = nearestPolylineIndex(boulevardPolyline, blk.b.lat, blk.b.lon);
+    const lo = Math.min(aIdx, bIdx), hi = Math.max(aIdx, bIdx);
+    const segment = boulevardPolyline.slice(lo, hi + 1);
+    return placeTreesAlongSegment(segment, spacing);
+  }
+  // Fallback: straight line between approximate crossings
+  return placeTreesAlongSegment([[blk.a.lat, blk.a.lon], [blk.b.lat, blk.b.lon]], spacing);
 }
 
 /* Polygon approximation of a circle on the ground, radius in metres. */
@@ -554,6 +598,62 @@ function drawTreeCanopies() {
    via the slider. */
 const DEFAULT_FLOORS = 4;            // 4 floors × 4 m = 16 m starting point
 const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
+
+/* Fetch the real Rothschild centreline from OSM and stitch its way
+   segments into a single polyline. Stored as boulevardPolyline. */
+async function loadBoulevard() {
+  const q = `[out:json][timeout:25];
+    (
+      way["name"="שדרות רוטשילד"]["highway"](32.05,34.76,32.08,34.79);
+      way["name:en"="Rothschild Boulevard"](32.05,34.76,32.08,34.79);
+    );
+    out geom;`;
+  try {
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const ways = (data.elements || [])
+      .filter(e => e.type === 'way' && e.geometry && e.geometry.length >= 2)
+      .map(e => e.geometry.map(p => [p.lat, p.lon]));
+    if (!ways.length) { console.warn('No Rothschild way found in OSM'); return; }
+
+    // Greedy chain: connect ways by closest endpoints
+    let chained = ways[0].slice();
+    const remaining = ways.slice(1);
+    while (remaining.length) {
+      const last = chained[chained.length - 1];
+      const first = chained[0];
+      let bestI = -1, bestD = Infinity, bestPos = null;
+      for (let i = 0; i < remaining.length; i++) {
+        const seg = remaining[i];
+        const a = seg[0], b = seg[seg.length - 1];
+        const dLastA = distM(last, a), dLastB = distM(last, b);
+        const dFirstA = distM(first, a), dFirstB = distM(first, b);
+        for (const [d, pos] of [[dLastA,'tail-a'],[dLastB,'tail-b'],[dFirstA,'head-a'],[dFirstB,'head-b']]) {
+          if (d < bestD) { bestD = d; bestI = i; bestPos = pos; }
+        }
+      }
+      if (bestI === -1 || bestD > 50) break;
+      let seg = remaining[bestI].slice();
+      if (bestPos === 'tail-b') seg.reverse();
+      if (bestPos === 'head-a') seg.reverse();
+      if (bestPos.startsWith('tail')) chained = chained.concat(seg.slice(1));
+      else                            chained = seg.concat(chained.slice(1));
+      remaining.splice(bestI, 1);
+    }
+    boulevardPolyline = chained;
+    console.log(`Rothschild centreline: ${boulevardPolyline.length} points, ${Math.round(
+      boulevardPolyline.reduce((s, p, i) => i ? s + distM(boulevardPolyline[i-1], p) : 0, 0)
+    )} m`);
+  } catch (err) {
+    console.warn('Boulevard fetch failed:', err);
+  }
+}
 
 async function loadBuildings() {
   setStatus('pending');
@@ -939,9 +1039,10 @@ window.addEventListener('load', () => {
   document.getElementById('date-pick').value = dateToISO(currentDate);
   document.getElementById('time-display').textContent = fmtTime(hour);
   initMap();
-  setTimeout(() => {
+  setTimeout(async () => {
     map.invalidateSize();
-    loadBuildings();
+    await loadBoulevard();
+    await loadBuildings();
   }, 100);
 });
 </script>
