@@ -466,7 +466,10 @@ function getTreeBlocks() {
 /* Tree centres evenly spaced along the block — TWO rows, one on each
    side of the centreline, offset perpendicular to the boulevard
    bearing by ~ROW_OFFSET_M. */
-/* Single row of trees right on the polyline (median centreline). */
+/* Two parallel rows of trees on the median, ±ROW_OFFSET_M from
+   its centreline. ~4 m matches the visible spacing between the
+   two tree rows on the actual boulevard. */
+const ROW_OFFSET_M = 4;
 
 /* Distance in metres between two [lat, lon] points. */
 function distM(a, b) {
@@ -501,11 +504,16 @@ function placeTreesAlongSegment(segment, spacing) {
     const dE = (p2[1] - p1[1]) * MPD * latC;
     const segLen = Math.hypot(dN, dE);
     if (segLen < 0.001) continue;
+    const bearing = Math.atan2(dE, dN);
+    const perp = bearing - Math.PI / 2;
+    const offLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
+    const offLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
     while (nextAt <= accum + segLen) {
       const t = (nextAt - accum) / segLen;
       const cx = p1[0] + (p2[0] - p1[0]) * t;
       const cy = p1[1] + (p2[1] - p1[1]) * t;
-      positions.push([cx, cy]);
+      positions.push([cx + offLat, cy + offLon]);
+      positions.push([cx - offLat, cy - offLon]);
       nextAt += spacing;
     }
     accum += segLen;
@@ -597,31 +605,10 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-/* Boulevard polyline: try the known OSM way ID for Rothschild
-   directly; fall back to the CROSSINGS approximation if unavailable. */
-async function loadBoulevard() {
-  try {
-    const q = `[out:json][timeout:25];way(154741757);out geom;`;
-    const r = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (r.ok) {
-      const data = await r.json();
-      const way = (data.elements || []).find(e => e.type === 'way' && e.geometry);
-      if (way && way.geometry.length >= 5) {
-        boulevardPolyline = way.geometry.map(p => [p.lat, p.lon]);
-        console.log(`OSM way 154741757: ${boulevardPolyline.length} points`);
-        return;
-      }
-    }
-  } catch (err) {
-    console.warn('OSM way 154741757 fetch failed:', err);
-  }
+/* Boulevard polyline straight from CROSSINGS — covers Habima → Herzl
+   end to end. Chunky (only 12 segments) but predictable. */
+function buildBoulevard() {
   boulevardPolyline = CROSSINGS.map(c => [c.lat, c.lon]);
-  console.log('Using CROSSINGS fallback');
 }
 
 async function loadBuildings() {
@@ -1010,7 +997,7 @@ window.addEventListener('load', () => {
   initMap();
   setTimeout(async () => {
     map.invalidateSize();
-    await loadBoulevard();
+    buildBoulevard();
     await loadBuildings();
   }, 100);
 });
