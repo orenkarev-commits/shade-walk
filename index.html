@@ -294,19 +294,20 @@ const LANDMARK_TOWERS = [
    Coordinates are best-effort approximations; edit them here if a block
    boundary looks off on the map. */
 const CROSSINGS = [
-  { name: 'Habima',      lat: 32.07301, lon: 34.77783 },
-  { name: 'Marmorek',    lat: 32.07153, lon: 34.77737 },
-  { name: 'Mazeh',       lat: 32.06961, lon: 34.77692 },
-  { name: 'Sheinkin',    lat: 32.06820, lon: 34.77619 },
-  { name: 'Allenby',     lat: 32.06660, lon: 34.77556 },
-  { name: 'Balfour',     lat: 32.06544, lon: 34.77503 },
-  { name: 'Nachmani',    lat: 32.06425, lon: 34.77451 },
-  { name: 'Brenner',     lat: 32.06320, lon: 34.77383 },
-  { name: 'Herzl',       lat: 32.06182, lon: 34.77302 },
-  { name: "Ahad Ha'am",  lat: 32.06046, lon: 34.77223 },
-  { name: 'Yavne',       lat: 32.05907, lon: 34.77138 },
-  { name: 'Lilienblum',  lat: 32.05823, lon: 34.77086 },
-  { name: 'Neve Tzedek', lat: 32.05750, lon: 34.77035 },
+  { name: 'Habima',           lat: 32.07301, lon: 34.77783 },
+  { name: 'Marmorek',         lat: 32.07153, lon: 34.77737 },
+  { name: 'Mazeh',            lat: 32.06961, lon: 34.77692 },
+  { name: 'Sheinkin',         lat: 32.06820, lon: 34.77619 },
+  { name: 'Allenby',          lat: 32.06660, lon: 34.77556 },
+  { name: 'Balfour',          lat: 32.06544, lon: 34.77503 },
+  { name: 'Nachmani',         lat: 32.06425, lon: 34.77451 },
+  { name: 'Brenner',          lat: 32.06320, lon: 34.77383 },
+  { name: 'Nachlat Binyamin', lat: 32.06251, lon: 34.77342 },
+  { name: 'Herzl',            lat: 32.06182, lon: 34.77302 },
+  { name: "Ahad Ha'am",       lat: 32.06046, lon: 34.77223 },
+  { name: 'Yavne',            lat: 32.05907, lon: 34.77138 },
+  { name: 'Lilienblum',       lat: 32.05823, lon: 34.77086 },
+  { name: 'Neve Tzedek',      lat: 32.05750, lon: 34.77035 },
 ];
 
 const DENSITY_FACTOR  = { none: 0,        sparse: 0.32, medium: 0.55, dense: 0.85 };
@@ -326,9 +327,9 @@ const BLOCK_DEFAULTS = { density: 'dense', h: 16, canopy: 12 };
    - One block has no trees
    - Herzl → Ahad Ha'am: sparse */
 const BLOCK_PRESETS = {
-  'Habima→Marmorek':    { density: 'medium', h: 16, canopy: 4 },   // tall + trimmed narrow
-  'Sheinkin→Allenby':   { density: 'none' },                       // no trees
-  "Herzl→Ahad Ha'am":   { density: 'sparse', h: 12, canopy: 8 },   // very sparse
+  'Habima→Marmorek':         { density: 'medium', h: 16, canopy: 4 }, // tall + trimmed narrow
+  'Sheinkin→Allenby':        { density: 'none' },                     // Section A: no trees
+  'Nachlat Binyamin→Herzl':  { density: 'sparse', h: 12, canopy: 8 }, // Section B: very sparse
 };
 
 const KEY_BLD  = 'shade-walk:v2:buildings';
