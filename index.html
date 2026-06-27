@@ -221,7 +221,7 @@
   </div>
   <div id="bld-meta">–</div>
   <label>Floors</label>
-  <input type="range" id="bld-slider" min="1" max="20" step="1" value="4">
+  <input type="range" id="bld-slider" min="1" max="50" step="1" value="4">
   <div class="readout">
     <span id="bld-floors">4</span> floors × 4 m = <strong><span id="bld-meters">16</span> m</strong>
   </div>
@@ -262,6 +262,18 @@ const TLV_LAT = 32.07, TLV_LON = 34.78;
 const FLOOR_M = 4;
 const GIS_PROXY = 'http://localhost:5001';
 
+/* Known tall towers on Rothschild — used to pre-populate manual
+   heights/floors on first load. Lat/lon are approximate; we match
+   to the nearest OSM footprint within MATCH_RADIUS_M. */
+const MATCH_RADIUS_M = 50;
+const LANDMARK_TOWERS = [
+  { name: 'Meier on Rothschild',              addr: '36 Rothschild', lat: 32.06657, lon: 34.77545, floors: 42, h: 158 },
+  { name: 'First International Bank Tower',   addr: '42 Rothschild', lat: 32.06520, lon: 34.77470, floors: 32, h: 132 },
+  { name: 'Rothschild 22 Tower',              addr: '22 Rothschild', lat: 32.06830, lon: 34.77650, floors: 29, h: 127 },
+  { name: 'Aviv Rothschild Tower',            addr: '56 Rothschild', lat: 32.06350, lon: 34.77380, floors: 30, h: 125 },
+  { name: '1 Rothschild Boulevard',           addr: '1 Rothschild',  lat: 32.07100, lon: 34.77780, floors: 34, h: 125 },
+];
+
 /* Cross-streets on Rothschild, north → south.
    Coordinates are best-effort approximations; edit them here if a block
    boundary looks off on the map. */
@@ -281,13 +293,14 @@ const CROSSINGS = [
   { name: 'Neve Tzedek', lat: 32.05750, lon: 34.77035 },
 ];
 
-const DENSITY_FACTOR = { sparse: 0.32, medium: 0.55, dense: 0.85 };
+const DENSITY_FACTOR  = { sparse: 0.32, medium: 0.55, dense: 0.85 };
+const TREE_SPACING_M  = { sparse: 18,    medium: 10,    dense: 6   }; // metres between trees
 const DENSITY_TIP = {
   sparse: 'Canopy covers ~30% of the walkway',
   medium: 'Canopy covers ~50% of the walkway',
   dense:  'Canopy covers most of the walkway',
 };
-const BLOCK_DEFAULTS = { density: 'medium', h: 12 };
+const BLOCK_DEFAULTS = { density: 'medium', h: 12, canopy: 6 };
 
 const KEY_BLD  = 'shade-walk:v2:buildings';
 const KEY_TREE = 'shade-walk:v2:trees';
@@ -405,10 +418,54 @@ function getTreeBlocks() {
       key,
       label: `${a.name} → ${b.name}`,
       density: ovr.density || BLOCK_DEFAULTS.density,
-      h:       ovr.h != null ? ovr.h : BLOCK_DEFAULTS.h,
+      h:       ovr.h      != null ? ovr.h      : BLOCK_DEFAULTS.h,
+      canopy:  ovr.canopy != null ? ovr.canopy : BLOCK_DEFAULTS.canopy,
       override: !!treeOverrides[key],
       a, b,
     });
+  }
+  return out;
+}
+
+/* Tree centres evenly spaced along the block — TWO rows, one on each
+   side of the centreline, offset perpendicular to the boulevard
+   bearing by ~ROW_OFFSET_M. */
+const ROW_OFFSET_M = 6; // distance from centreline to each tree row
+
+function getTreePositions(blk) {
+  const MPD = 111320;
+  const latC = Math.cos(TLV_LAT * Math.PI / 180);
+  const dN = (blk.b.lat - blk.a.lat) * MPD;
+  const dE = (blk.b.lon - blk.a.lon) * MPD * latC;
+  const lengthM = Math.hypot(dN, dE);
+  const bearing = Math.atan2(dE, dN);
+  const perp = bearing - Math.PI / 2;
+  const dLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
+  const dLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
+  const spacing = TREE_SPACING_M[blk.density] || 10;
+  const n = Math.max(1, Math.floor(lengthM / spacing));
+  const positions = [];
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const cx = blk.a.lat + (blk.b.lat - blk.a.lat) * t;
+    const cy = blk.a.lon + (blk.b.lon - blk.a.lon) * t;
+    positions.push([cx + dLat, cy + dLon]); // left row
+    positions.push([cx - dLat, cy - dLon]); // right row
+  }
+  return positions;
+}
+
+/* Polygon approximation of a circle on the ground, radius in metres. */
+function circlePolygon(center, radiusM, n = 12) {
+  const MPD = 111320;
+  const latC = Math.cos(center[0] * Math.PI / 180);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * 2 * Math.PI;
+    out.push([
+      center[0] + (radiusM * Math.sin(a)) / MPD,
+      center[1] + (radiusM * Math.cos(a)) / (MPD * latC),
+    ]);
   }
   return out;
 }
@@ -434,8 +491,23 @@ function initMap() {
     subdomains: 'abcd', maxZoom: 19,
   }).addTo(map);
   shadowLyr    = L.layerGroup().addTo(map);
+  treeLyr      = L.layerGroup().addTo(map);
   footprintLyr = L.layerGroup().addTo(map);
   heatmapLyr   = L.layerGroup();
+}
+
+/* Tree canopies — visible always, independent of sun. */
+function drawTreeCanopies() {
+  treeLyr.clearLayers();
+  getTreeBlocks().forEach(blk => {
+    getTreePositions(blk).forEach(pos => {
+      L.polygon(circlePolygon(pos, blk.canopy / 2, 14), {
+        fillColor: '#16a34a', fillOpacity: 0.55,
+        color: '#166534', weight: 0.8, opacity: 0.7,
+        interactive: false
+      }).addTo(treeLyr);
+    });
+  });
 }
 
 /* ───── Footprints from OpenStreetMap (Overpass) ─────
@@ -470,6 +542,7 @@ async function loadBuildings() {
           notes: `Default: ${DEFAULT_FLOORS} floors. Click to edit.`,
         };
       });
+    applyLandmarkTowers();
     setStatus('ok');
   } catch (err) {
     console.warn('Footprint load failed:', err);
@@ -477,8 +550,31 @@ async function loadBuildings() {
     setStatus('offline');
   }
   drawFootprints();
+  drawTreeCanopies();
   updateShadows();
   document.getElementById('loading').style.display = 'none';
+}
+
+/* Match each landmark tower to the nearest OSM footprint by centroid
+   distance and pre-populate its override if the user hasn't set one. */
+function applyLandmarkTowers() {
+  const latC = Math.cos(TLV_LAT * Math.PI / 180);
+  LANDMARK_TOWERS.forEach(lm => {
+    let best = null, bestDist = Infinity;
+    for (const b of buildings) {
+      const dLat = (b.centroid[0] - lm.lat) * 111320;
+      const dLon = (b.centroid[1] - lm.lon) * 111320 * latC;
+      const dist = Math.hypot(dLat, dLon);
+      if (dist < bestDist) { bestDist = dist; best = b; }
+    }
+    if (!best || bestDist > MATCH_RADIUS_M) return;
+    best.name = lm.name;
+    best.addr = lm.addr;
+    if (!buildingOverrides[best.id]) {
+      buildingOverrides[best.id] = { floors: lm.floors, h: lm.h, preset: true };
+    }
+  });
+  lsSave(KEY_BLD, buildingOverrides);
 }
 
 function setStatus(s) {
@@ -510,7 +606,7 @@ function drawFootprints() {
       color: c, weight: 1, opacity: 0.6,
     })
       .bindTooltip(
-        `<b>Building</b><br>` +
+        `<b>${b.name || b.addr || 'Building'}</b><br>` +
         `${r.floors} floors · <b>${Math.round(r.h)} m</b>` +
         (r.src === 'manual' ? ' <span style="color:#2563eb">(edited)</span>' : ' <span style="opacity:0.6">(default)</span>') +
         `<br><span style="opacity:0.5; font-size:10px;">Click to set floors</span>`,
@@ -543,7 +639,22 @@ function updateShadows() {
     }).addTo(shadowLyr);
   });
 
-  // Tree canopies only contribute to the accumulated heatmap (👁 button).
+  // Per-tree shadows. Each tree is a vertical cylinder of canopy
+  // diameter; its shadow is the convex hull of the canopy disc
+  // and that disc translated by the sun vector × tree height.
+  getTreeBlocks().forEach(blk => {
+    const r = blk.canopy / 2;
+    const dens = DENSITY_FACTOR[blk.density] || 0.5;
+    getTreePositions(blk).forEach(pos => {
+      const canopyPoly = circlePolygon(pos, r, 12);
+      const env = castShadow(canopyPoly, blk.h, dLat, dLon);
+      L.polygon(env, {
+        fillColor: '#14532d',
+        fillOpacity: 0.18 + 0.30 * dens,
+        color: 'transparent', interactive: false
+      }).addTo(shadowLyr);
+    });
+  });
   // They're not drawn as live polygons here, because the per-block
   // geometry is derived from approximate crossing coordinates and would
   // otherwise draw a misaligned green stripe across the map.
@@ -560,8 +671,18 @@ async function runHeatmap() {
     heatmapLyr.clearLayers();
     const renderer = L.canvas({ padding: 0.5 });
     const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI / 180);
-    const blocks = getTreeBlocks().map(b => ({ blk: b, poly: blockPolygon(b, 12) }));
     const bldgs = buildings.map(b => ({ poly: b.poly, h: resolveBuildingHeight(b).h }));
+    const trees = [];
+    getTreeBlocks().forEach(blk => {
+      const dens = DENSITY_FACTOR[blk.density] || 0.4;
+      getTreePositions(blk).forEach(pos => {
+        trees.push({
+          canopyPoly: circlePolygon(pos, blk.canopy / 2, 10),
+          h: blk.h,
+          densityFactor: dens,
+        });
+      });
+    });
 
     for (let h = 5; h <= 20; h += 1/6) {
       const sun = getSun(currentDate, h);
@@ -577,12 +698,11 @@ async function runHeatmap() {
           color: 'transparent', interactive: false
         }).addTo(heatmapLyr);
       }
-      for (const t of blocks) {
-        const dens = DENSITY_FACTOR[t.blk.density] || 0.4;
-        const hb = t.blk.h >= 12 ? 1 : t.blk.h >= 9 ? 0.85 : 0.65;
-        const env = castShadow(t.poly, t.blk.h, dLat, dLon);
+      for (const t of trees) {
+        const env = castShadow(t.canopyPoly, t.h, dLat, dLon);
         L.polygon(env, {
-          renderer, fillColor: '#14532d', fillOpacity: 0.035 * dens * hb,
+          renderer, fillColor: '#14532d',
+          fillOpacity: 0.035 * t.densityFactor,
           color: 'transparent', interactive: false
         }).addTo(heatmapLyr);
       }
@@ -658,40 +778,47 @@ function renderTreeEditor() {
         `).join('')}
       </div>
       <div class="h-readout">
-        <span>Canopy height</span>
+        <span>Tree height</span>
         <strong><span class="h-val">${blk.h}</span> m</strong>
       </div>
       <input type="range" class="h-sl" min="4" max="18" step="1" value="${blk.h}">
+      <div class="h-readout" style="margin-top:8px;">
+        <span>Canopy width</span>
+        <strong><span class="c-val">${blk.canopy}</span> m</strong>
+      </div>
+      <input type="range" class="c-sl" min="2" max="10" step="1" value="${blk.canopy}">
     </div>
   `).join('');
+
+  const commitOverride = (card, key) => {
+    const cur = treeOverrides[key] || {};
+    cur.density = card.querySelector('.density-row button.on')?.dataset.d || cur.density || 'medium';
+    cur.h      = parseInt(card.querySelector('.h-sl').value);
+    cur.canopy = parseInt(card.querySelector('.c-sl').value);
+    treeOverrides[key] = cur;
+    lsSave(KEY_TREE, treeOverrides);
+    drawTreeCanopies();
+    updateShadows();
+    heatmapDate = null;
+    if (heatmapOn) runHeatmap();
+  };
+
   root.querySelectorAll('.tree-card').forEach(card => {
     const key = card.dataset.key;
     card.querySelectorAll('.density-row button').forEach(btn => {
       btn.addEventListener('click', () => {
-        const cur = treeOverrides[key] || {};
-        cur.density = btn.dataset.d;
-        if (cur.h == null) cur.h = parseInt(card.querySelector('.h-sl').value);
-        treeOverrides[key] = cur;
-        lsSave(KEY_TREE, treeOverrides);
+        card.querySelectorAll('.density-row button').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        commitOverride(card, key);
         renderTreeEditor();
-        updateShadows();
-        heatmapDate = null;
-        if (heatmapOn) runHeatmap();
       });
     });
-    const sl = card.querySelector('.h-sl'), readout = card.querySelector('.h-val');
-    sl.addEventListener('input', () => readout.textContent = sl.value);
-    sl.addEventListener('change', () => {
-      const cur = treeOverrides[key] || {};
-      cur.h = parseInt(sl.value);
-      if (!cur.density) cur.density = card.querySelector('.density-row button.on')?.dataset.d || 'medium';
-      treeOverrides[key] = cur;
-      lsSave(KEY_TREE, treeOverrides);
-      renderTreeEditor();
-      updateShadows();
-      heatmapDate = null;
-      if (heatmapOn) runHeatmap();
-    });
+    const hSl = card.querySelector('.h-sl'), hOut = card.querySelector('.h-val');
+    hSl.addEventListener('input', () => hOut.textContent = hSl.value);
+    hSl.addEventListener('change', () => commitOverride(card, key));
+    const cSl = card.querySelector('.c-sl'), cOut = card.querySelector('.c-val');
+    cSl.addEventListener('input', () => cOut.textContent = cSl.value);
+    cSl.addEventListener('change', () => commitOverride(card, key));
   });
 }
 document.getElementById('open-trees').addEventListener('click', () => {
