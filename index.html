@@ -294,20 +294,18 @@ const LANDMARK_TOWERS = [
    Coordinates are best-effort approximations; edit them here if a block
    boundary looks off on the map. */
 const CROSSINGS = [
-  { name: 'Habima Square',    lat: 32.07300, lon: 34.77800 },
-  { name: 'Ben Zion',         lat: 32.07214, lon: 34.77760 },
-  { name: 'Melchett',         lat: 32.07128, lon: 34.77720 },
-  { name: 'Sheinkin',         lat: 32.07042, lon: 34.77680 },
-  { name: 'Balfour',          lat: 32.06956, lon: 34.77640 },
-  { name: 'Marmorek',         lat: 32.06870, lon: 34.77600 },
-  { name: 'Nahmani',          lat: 32.06784, lon: 34.77560 },
-  { name: 'Ber Borochov',     lat: 32.06698, lon: 34.77520 },
-  { name: 'Mazeh',            lat: 32.06612, lon: 34.77480 },
-  { name: 'Allenby',          lat: 32.06526, lon: 34.77440 },
-  { name: 'Nahalat Binyamin', lat: 32.06440, lon: 34.77400 },
-  { name: 'Kalisher',         lat: 32.06354, lon: 34.77360 },
-  { name: 'Yehuda Halevi',    lat: 32.06268, lon: 34.77320 },
-  { name: 'Herzl',            lat: 32.06182, lon: 34.77280 },
+  { name: 'Habima Square',    lat: 32.07300, lon: 34.77800 }, // north terminus
+  { name: 'Hashmonaim',       lat: 32.07200, lon: 34.77760 },
+  { name: 'Bar Ilan',         lat: 32.07100, lon: 34.77720 },
+  { name: 'Sheinkin',         lat: 32.07000, lon: 34.77680 },
+  { name: 'Balfour',          lat: 32.06900, lon: 34.77640 },
+  { name: 'Mazeh',            lat: 32.06800, lon: 34.77600 },
+  { name: 'Nahmani',          lat: 32.06700, lon: 34.77560 },
+  { name: 'Betzalel Yaffe',   lat: 32.06600, lon: 34.77520 },
+  { name: 'Yavne',            lat: 32.06500, lon: 34.77480 },
+  { name: 'Allenby',          lat: 32.06400, lon: 34.77440 },
+  { name: 'Nahalat Binyamin', lat: 32.06300, lon: 34.77400 },
+  { name: 'Herzl',            lat: 32.06200, lon: 34.77360 }, // south terminus
 ];
 
 const DENSITY_FACTOR  = { none: 0,        sparse: 0.32, medium: 0.55, dense: 0.85 };
@@ -328,11 +326,9 @@ const BLOCK_DEFAULTS = { density: 'dense', h: 16, canopy: 12 };
    - Herzl → Ahad Ha'am: sparse */
 const BLOCK_PRESETS = {
   // Habima end: tall + trimmed narrow canopy
-  'Habima Square→Ben Zion':   { density: 'medium', h: 16, canopy: 4 },
-  // 'Section B' sparse stretch (Herzl ⇄ Nahalat Binyamin) — now three blocks
-  'Nahalat Binyamin→Kalisher':{ density: 'sparse', h: 12, canopy: 8 },
-  'Kalisher→Yehuda Halevi':   { density: 'sparse', h: 12, canopy: 8 },
-  'Yehuda Halevi→Herzl':      { density: 'sparse', h: 12, canopy: 8 },
+  'Habima Square→Hashmonaim': { density: 'medium', h: 16, canopy: 4 },
+  // Section B: sparse stretch — Nahalat Binyamin to Herzl
+  'Nahalat Binyamin→Herzl':   { density: 'sparse', h: 12, canopy: 8 },
 };
 
 const KEY_BLD  = 'shade-walk:v2:buildings';
