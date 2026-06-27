@@ -497,18 +497,10 @@ function updateShadows() {
     }).addTo(shadowLyr);
   });
 
-  getTreeBlocks().forEach(blk => {
-    const poly = blockPolygon(blk, 12);
-    const dens = DENSITY_FACTOR[blk.density] || 0.4;
-    const hb = blk.h >= 12 ? 1 : blk.h >= 9 ? 0.85 : 0.65;
-    const sdLat = dLat * blk.h, sdLon = dLon * blk.h;
-    const sp = [...poly, ...poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
-    L.polygon(sp, {
-      fillColor: '#14532d',
-      fillOpacity: Math.min(0.5, 0.18 + 0.3 * dens * hb),
-      color: 'transparent', interactive: false
-    }).addTo(shadowLyr);
-  });
+  // Tree canopies only contribute to the accumulated heatmap (👁 button).
+  // They're not drawn as live polygons here, because the per-block
+  // geometry is derived from approximate crossing coordinates and would
+  // otherwise draw a misaligned green stripe across the map.
 }
 
 /* ───── Day-shade heatmap: accumulated shadow polygons ─────
