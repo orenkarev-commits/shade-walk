@@ -466,7 +466,13 @@ function getTreeBlocks() {
 /* Tree centres evenly spaced along the block — TWO rows, one on each
    side of the centreline, offset perpendicular to the boulevard
    bearing by ~ROW_OFFSET_M. */
-const ROW_OFFSET_M = 4; // distance from centreline to each tree row (median is ~15m wide)
+/* Trees flank the median (the central walkable strip between the two
+   Rothschild car roads). The OSM polyline we follow is one of those
+   car roads, so BOTH tree rows are offset to the *median side* of the
+   polyline — not symmetric around it. */
+const ROW_INNER_M = 4;   // nearer tree row, on the median's road-side edge
+const ROW_OUTER_M = 14;  // farther tree row, on the median's far edge
+const MEDIAN_SIDE = 1;   // perpendicular handedness; flip to -1 if trees come out on the wrong side
 
 /* Distance in metres between two [lat, lon] points. */
 function distM(a, b) {
@@ -485,8 +491,9 @@ function nearestPolylineIndex(poly, lat, lon) {
   return bestI;
 }
 
-/* Walk along a polyline segment placing trees every `spacing` metres,
-   with perpendicular ±row offsets. Each pair = two rows. */
+/* Walk along a polyline segment placing trees every `spacing` metres.
+   Both rows are on the median side of the polyline (asymmetric offset),
+   so trees flank the central walkable strip, not the road we follow. */
 function placeTreesAlongSegment(segment, spacing) {
   if (!segment || segment.length < 2) return [];
   const MPD = 111320;
@@ -501,15 +508,17 @@ function placeTreesAlongSegment(segment, spacing) {
     const segLen = Math.hypot(dN, dE);
     if (segLen < 0.001) continue;
     const bearing = Math.atan2(dE, dN);
-    const perp = bearing - Math.PI / 2;
-    const offLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
-    const offLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
+    const perp = bearing + MEDIAN_SIDE * Math.PI / 2;
+    const innerLat = (Math.cos(perp) * ROW_INNER_M) / MPD;
+    const innerLon = (Math.sin(perp) * ROW_INNER_M) / (MPD * latC);
+    const outerLat = (Math.cos(perp) * ROW_OUTER_M) / MPD;
+    const outerLon = (Math.sin(perp) * ROW_OUTER_M) / (MPD * latC);
     while (nextAt <= accum + segLen) {
       const t = (nextAt - accum) / segLen;
       const cx = p1[0] + (p2[0] - p1[0]) * t;
       const cy = p1[1] + (p2[1] - p1[1]) * t;
-      positions.push([cx + offLat, cy + offLon]);
-      positions.push([cx - offLat, cy - offLon]);
+      positions.push([cx + innerLat, cy + innerLon]); // road-edge row
+      positions.push([cx + outerLat, cy + outerLon]); // far-edge row
       nextAt += spacing;
     }
     accum += segLen;
@@ -624,50 +633,20 @@ async function loadBoulevard() {
     );
     if (!allWays.length) { console.warn('No Rothschild way found in OSM'); return; }
 
-    // What did OSM give us? Print so we can see if the median path is there.
     console.log('Rothschild ways:',
       allWays.map(w => ({ id: w.id, highway: w.tags?.highway, name: w.tags?.name, n: w.geometry.length }))
     );
 
-    // Prefer the median pedestrian/cycle strip; only fall back to the
-    // car roads if no path-type way was named "Rothschild".
-    const PED_TYPES = new Set(['path', 'footway', 'cycleway', 'pedestrian', 'living_street', 'track']);
-    let chosen = allWays.filter(w => PED_TYPES.has(w.tags?.highway));
-    if (!chosen.length) {
-      console.warn('No pedestrian/cycle Rothschild way — using car-road centreline as fallback.');
-      chosen = allWays;
-    }
-    const ways = chosen.map(w => w.geometry.map(p => [p.lat, p.lon]));
-
-    // Greedy chain: connect ways by closest endpoints
-    let chained = ways[0].slice();
-    const remaining = ways.slice(1);
-    while (remaining.length) {
-      const last = chained[chained.length - 1];
-      const first = chained[0];
-      let bestI = -1, bestD = Infinity, bestPos = null;
-      for (let i = 0; i < remaining.length; i++) {
-        const seg = remaining[i];
-        const a = seg[0], b = seg[seg.length - 1];
-        const dLastA = distM(last, a), dLastB = distM(last, b);
-        const dFirstA = distM(first, a), dFirstB = distM(first, b);
-        for (const [d, pos] of [[dLastA,'tail-a'],[dLastB,'tail-b'],[dFirstA,'head-a'],[dFirstB,'head-b']]) {
-          if (d < bestD) { bestD = d; bestI = i; bestPos = pos; }
-        }
-      }
-      if (bestI === -1 || bestD > 50) break;
-      let seg = remaining[bestI].slice();
-      if (bestPos === 'tail-b') seg.reverse();
-      if (bestPos === 'head-a') seg.reverse();
-      if (bestPos.startsWith('tail')) chained = chained.concat(seg.slice(1));
-      else                            chained = seg.concat(chained.slice(1));
-      remaining.splice(bestI, 1);
-    }
-    boulevardPolyline = chained;
-    console.log(`Rothschild centreline: ${boulevardPolyline.length} points, ${Math.round(
+    // Use the single longest matched way as the boulevard polyline.
+    // Chaining multiple road segments tends to zigzag between the two
+    // parallel car roads; one long segment is more reliable.
+    const longest = allWays.reduce(
+      (best, cur) => cur.geometry.length > best.geometry.length ? cur : best, allWays[0]
+    );
+    boulevardPolyline = longest.geometry.map(p => [p.lat, p.lon]);
+    console.log(`Using way ${longest.id} (${longest.tags?.highway}): ${boulevardPolyline.length} points, ${Math.round(
       boulevardPolyline.reduce((s, p, i) => i ? s + distM(boulevardPolyline[i-1], p) : 0, 0)
     )} m`);
-    // Thin grey guide line — confirms the polyline followed the real boulevard.
     L.polyline(boulevardPolyline, {
       color: '#6b7280', weight: 1.5, opacity: 0.5,
       dashArray: '4,4', interactive: false,
