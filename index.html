@@ -293,19 +293,23 @@ const LANDMARK_TOWERS = [
 /* Cross-streets on Rothschild, north → south.
    Coordinates are best-effort approximations; edit them here if a block
    boundary looks off on the map. */
+/* Approximate coords along the real SW-curving path of Rothschild.
+   These are only used as hints — each crossing is snapped to the
+   nearest vertex on the OSM polyline. The CURVE matters, not the
+   exact coords. */
 const CROSSINGS = [
-  { name: 'Habima Square',    lat: 32.07300, lon: 34.77800 }, // north terminus
-  { name: 'Hashmonaim',       lat: 32.07200, lon: 34.77760 },
-  { name: 'Bar Ilan',         lat: 32.07100, lon: 34.77720 },
-  { name: 'Sheinkin',         lat: 32.07000, lon: 34.77680 },
-  { name: 'Balfour',          lat: 32.06900, lon: 34.77640 },
-  { name: 'Mazeh',            lat: 32.06800, lon: 34.77600 },
-  { name: 'Nahmani',          lat: 32.06700, lon: 34.77560 },
-  { name: 'Betzalel Yaffe',   lat: 32.06600, lon: 34.77520 },
-  { name: 'Yavne',            lat: 32.06500, lon: 34.77480 },
-  { name: 'Allenby',          lat: 32.06400, lon: 34.77440 },
-  { name: 'Nahalat Binyamin', lat: 32.06300, lon: 34.77400 },
-  { name: 'Herzl',            lat: 32.06200, lon: 34.77360 }, // south terminus
+  { name: 'Habima Square',    lat: 32.07350, lon: 34.77790 }, // north terminus
+  { name: 'Hashmonaim',       lat: 32.07150, lon: 34.77770 },
+  { name: 'Bar Ilan',         lat: 32.07000, lon: 34.77745 },
+  { name: 'Sheinkin',         lat: 32.06820, lon: 34.77700 },
+  { name: 'Balfour',          lat: 32.06650, lon: 34.77640 },
+  { name: 'Mazeh',            lat: 32.06450, lon: 34.77550 },
+  { name: 'Nahmani',          lat: 32.06320, lon: 34.77470 },
+  { name: 'Betzalel Yaffe',   lat: 32.06220, lon: 34.77400 },
+  { name: 'Yavne',            lat: 32.06130, lon: 34.77330 },
+  { name: 'Allenby',          lat: 32.06040, lon: 34.77260 },
+  { name: 'Nahalat Binyamin', lat: 32.05950, lon: 34.77180 },
+  { name: 'Herzl',            lat: 32.05880, lon: 34.77100 }, // south terminus
 ];
 
 const DENSITY_FACTOR  = { none: 0,        sparse: 0.32, medium: 0.55, dense: 0.85 };
@@ -600,8 +604,8 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 async function loadBoulevard() {
   const q = `[out:json][timeout:25];
     (
-      way["name"="שדרות רוטשילד"]["highway"](32.05,34.76,32.08,34.79);
-      way["name:en"="Rothschild Boulevard"](32.05,34.76,32.08,34.79);
+      way["highway"]["name"~"רוטשילד"](32.05,34.76,32.08,34.79);
+      way["highway"]["name:en"~"Rothschild",i](32.05,34.76,32.08,34.79);
     );
     out geom;`;
   try {
@@ -646,6 +650,11 @@ async function loadBoulevard() {
     console.log(`Rothschild centreline: ${boulevardPolyline.length} points, ${Math.round(
       boulevardPolyline.reduce((s, p, i) => i ? s + distM(boulevardPolyline[i-1], p) : 0, 0)
     )} m`);
+    // Thin grey guide line — confirms the polyline followed the real boulevard.
+    L.polyline(boulevardPolyline, {
+      color: '#6b7280', weight: 1.5, opacity: 0.5,
+      dashArray: '4,4', interactive: false,
+    }).addTo(map);
   } catch (err) {
     console.warn('Boulevard fetch failed:', err);
   }
