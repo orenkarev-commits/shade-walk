@@ -4,240 +4,1448 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Shade Walk · Rothschild</title>
-<script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
-<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
-<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  body { height: 100vh; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-  #map { position: fixed; inset: 0; }
+  html, body { height: 100%; background: #0d0d0d; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; -webkit-font-smoothing: antialiased; }
 
-  #top {
-    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
-    z-index: 200; display: flex; align-items: center; gap: 10px; white-space: nowrap;
-    background: rgba(255,255,255,0.96); border: 1px solid rgba(0,0,0,0.12);
-    border-radius: 99px; padding: 8px 10px 8px 18px; box-shadow: 0 4px 20px rgba(0,0,0,0.14);
+  /* ── FULL-SCREEN MAP ── */
+  #map { position: fixed; inset: 0; z-index: 0; }
+
+  /* ── TOP PILL — time + season ── */
+  #top-bar {
+    position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+    z-index: 1000;
+    display: flex; align-items: center; gap: 0;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 99px;
+    padding: 6px 6px 6px 16px;
+    white-space: nowrap;
   }
-  #app-name { font-size: 13px; font-weight: 700; color: #111; }
-  #tsl { width: 150px; accent-color: #15803d; cursor: pointer; }
-  #tval { font-size: 13px; font-weight: 600; color: #111; min-width: 64px; }
+  #app-name {
+    font-size: 13px; font-weight: 600; color: #fff;
+    letter-spacing: -0.3px; margin-right: 16px;
+  }
+  #time-wrap {
+    display: flex; align-items: center; gap: 8px;
+  }
+  #time-icon { font-size: 12px; opacity: 0.5; }
+  #tsl {
+    -webkit-appearance: none; width: 140px; height: 2px;
+    background: rgba(255,255,255,0.2); border-radius: 2px; outline: none; cursor: pointer;
+  }
+  #tsl::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+  }
+  #tval {
+    font-size: 13px; font-weight: 600; color: #fff;
+    min-width: 60px; text-align: right;
+  }
+  #season-wrap {
+    display: flex; gap: 2px; margin-left: 10px;
+  }
   .sb {
     font-size: 11px; padding: 5px 10px; border-radius: 99px;
-    border: 1px solid rgba(0,0,0,0.15); background: transparent;
-    cursor: pointer; color: #555; font-weight: 500; transition: all .15s;
+    border: none; background: transparent; color: rgba(255,255,255,0.45);
+    cursor: pointer; transition: all .15s; font-weight: 500;
   }
-  .sb.on { background: #111; color: #fff; border-color: #111; }
+  .sb.on { background: #fff; color: #000; }
 
-  #sun-card {
-    position: fixed; top: 70px; right: 14px; z-index: 200;
-    background: rgba(255,255,255,0.96); border: 1px solid rgba(0,0,0,0.10);
-    border-radius: 12px; padding: 10px 14px; font-size: 12px; color: #555; line-height: 1.7;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.10);
+  /* ── BOTTOM CARD — shade info ── */
+  #bottom-card {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 1000;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 20px;
+    padding: 16px 20px;
+    min-width: 320px; max-width: 480px; width: calc(100vw - 32px);
   }
-  #sun-card strong { color: #111; font-size: 14px; font-weight: 700; display: block; }
-  #help { position: fixed; bottom: 16px; left: 14px; z-index: 200; font-size: 11px; color: rgba(0,0,0,0.5);
-          background: rgba(255,255,255,0.85); padding: 4px 10px; border-radius: 8px; }
+  #tip-text {
+    font-size: 13px; line-height: 1.6; color: rgba(255,255,255,0.75);
+    margin-bottom: 14px;
+  }
+  #tip-text strong { color: #fff; font-weight: 600; }
+  #shade-bar-wrap {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  }
+  #shade-label { font-size: 11px; color: rgba(255,255,255,0.45); min-width: 80px; }
+  #shade-bar-bg {
+    flex: 1; height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.1); overflow: hidden;
+  }
+  #shade-bar-fill {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, #1a6e1a, #86efac);
+    transition: width 0.4s ease;
+  }
+  #shade-pct { font-size: 13px; font-weight: 700; color: #86efac; min-width: 36px; text-align: right; }
+  #stats-row {
+    display: flex; gap: 0; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px;
+  }
+  .stat { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .stat + .stat { border-left: 1px solid rgba(255,255,255,0.08); padding-left: 16px; margin-left: 0; }
+  .stat-n { font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px; line-height: 1; }
+  .stat-l { font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+
+  /* ── LEGEND PILL ── */
+  #legend {
+    position: fixed; top: 76px; left: 16px; z-index: 1000;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 14px; padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .li { display: flex; align-items: center; gap: 8px; font-size: 11px; color: rgba(255,255,255,0.6); }
+  .lc { width: 28px; height: 4px; border-radius: 2px; flex-shrink: 0; }
+
+  /* ── SUN POSITION ── */
+  #sun-pos {
+    position: fixed; top: 76px; right: 16px; z-index: 1000;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 14px; padding: 10px 14px;
+    font-size: 11px; color: rgba(255,255,255,0.5);
+    text-align: right; line-height: 1.7;
+  }
+  #sun-pos strong { color: #fff; font-size: 13px; font-weight: 600; display: block; }
+
+  /* ── LOADING ── */
+  #loading {
+    position: fixed; inset: 0; z-index: 9999;
+    background: #0d0d0d;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 12px;
+    transition: opacity 0.5s;
+  }
+  #lring, .lring {
+    width: 28px; height: 28px;
+    border: 2px solid rgba(255,255,255,0.1);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    margin: 0 auto;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #lmsg { font-size: 13px; color: rgba(255,255,255,0.45); }
+
+  .leaflet-container { background: #1a1a1a; }
+
+  /* ── DATE PICKER ── */
+  #date-pick {
+    background: transparent; color: #fff; border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 99px; padding: 4px 10px; font-size: 11px;
+    margin-left: 10px; font-family: inherit;
+    color-scheme: dark;
+  }
+  #date-pick:hover { border-color: rgba(255,255,255,0.35); }
+
+  /* ── ACTION RAIL ── */
+  #action-rail {
+    position: fixed; bottom: 50%; right: 16px; z-index: 1000;
+    transform: translateY(50%);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .rail-btn {
+    width: 40px; height: 40px; border-radius: 12px;
+    background: rgba(10,10,10,0.88);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff; font-size: 18px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .rail-btn:hover { background: rgba(255,255,255,0.12); }
+  .rail-btn.on { background: rgba(134,239,172,0.18); border-color: #86efac; }
+  .rail-btn.off { opacity: 0.6; }
+
+  /* ── EDITOR PANELS ── */
+  .editor-panel {
+    position: fixed; z-index: 1100;
+    background: rgba(10,10,10,0.94);
+    backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 18px;
+    color: #fff;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+    overflow: hidden;
+  }
+  #bld-editor {
+    top: 90px; left: 50%; transform: translateX(-50%);
+    width: 320px;
+  }
+  .editor-panel.side {
+    top: 90px; right: 70px; bottom: 24px;
+    width: 320px;
+    display: flex; flex-direction: column;
+  }
+  .ep-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .ep-header h3 {
+    font-size: 13px; font-weight: 600; letter-spacing: -0.2px;
+  }
+  .ep-close {
+    background: transparent; border: none; color: rgba(255,255,255,0.5);
+    font-size: 20px; cursor: pointer; padding: 0; width: 24px;
+  }
+  .ep-close:hover { color: #fff; }
+  .ep-body {
+    padding: 14px 16px; overflow-y: auto; flex: 1;
+  }
+  .ep-meta {
+    font-size: 11px; color: rgba(255,255,255,0.55);
+    margin-bottom: 14px; line-height: 1.5;
+  }
+  .ep-label {
+    font-size: 10px; color: rgba(255,255,255,0.5);
+    text-transform: uppercase; letter-spacing: 0.5px;
+    display: block; margin-bottom: 6px;
+  }
+  .ep-body input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 2px;
+    background: rgba(255,255,255,0.2); border-radius: 2px; outline: none;
+    margin: 6px 0;
+  }
+  .ep-body input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+  }
+  .ep-readout {
+    font-size: 12px; color: rgba(255,255,255,0.7); margin: 8px 0 14px;
+  }
+  .ep-readout strong { color: #fff; font-weight: 700; }
+  .ep-actions {
+    display: flex; gap: 8px; margin-top: 8px;
+  }
+  .ep-btn {
+    flex: 1; padding: 9px 12px; border-radius: 10px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #fff; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .ep-btn:hover { background: rgba(255,255,255,0.18); }
+  .ep-btn.primary { background: #fff; color: #000; border-color: #fff; }
+  .ep-btn.primary:hover { background: rgba(255,255,255,0.85); }
+
+  /* Tree-block card */
+  .tb-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .tb-card h4 {
+    font-size: 12px; font-weight: 600; margin-bottom: 8px;
+    color: #fff;
+  }
+  .tb-density { display: flex; gap: 4px; margin-bottom: 10px; }
+  .tb-density button {
+    flex: 1; padding: 6px 4px; font-size: 10px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+    color: rgba(255,255,255,0.6); border-radius: 8px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .tb-density button.on {
+    background: #fff; color: #000; border-color: #fff;
+  }
+  .tb-density button[title] { cursor: help; }
+  .tb-h-readout {
+    font-size: 10px; color: rgba(255,255,255,0.5);
+    display: flex; justify-content: space-between;
+    margin-bottom: 4px; letter-spacing: 0.3px;
+  }
+  .tb-h-readout strong { color: #fff; font-weight: 600; }
+
+  /* Compute overlay */
+  #compute-overlay {
+    position: fixed; inset: 0; z-index: 9998;
+    background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .co-card {
+    background: rgba(10,10,10,0.95);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 24px 32px; text-align: center;
+    color: rgba(255,255,255,0.85);
+    font-size: 13px;
+  }
 </style>
 </head>
 <body>
+
 <div id="map"></div>
 
-<div id="top">
-  <span id="app-name">🌿 Shade Walk · Rothschild</span>
-  <input type="range" id="tsl" min="6" max="19" step="0.5" value="9">
-  <span id="tval">9:00 am</span>
-  <button class="sb on" data-s="summer">Summer</button>
-  <button class="sb"    data-s="spring">Spring</button>
-  <button class="sb"    data-s="autumn">Autumn</button>
-  <button class="sb"    data-s="winter">Winter</button>
+<!-- Loading -->
+<div id="loading">
+  <div id="lring"></div>
+  <div id="lmsg">Loading Rothschild…</div>
 </div>
 
-<div id="sun-card">
-  <strong id="sc-time">–</strong>
-  <span id="sc-detail">–</span>
+<!-- Top control bar -->
+<div id="top-bar">
+  <span id="app-name">🌿 Shade Walk</span>
+  <div id="time-wrap">
+    <span id="time-icon">☀</span>
+    <input type="range" id="tsl" min="5" max="20" step="0.166" value="8">
+    <span id="tval">8:00 am</span>
+  </div>
+  <input type="date" id="date-pick" />
+  <div id="season-wrap">
+    <button class="sb on" data-s="summer">Sum</button>
+    <button class="sb" data-s="spring">Spr</button>
+    <button class="sb" data-s="autumn">Aut</button>
+    <button class="sb" data-s="winter">Win</button>
+  </div>
 </div>
 
-<div id="help">Drag the time slider — building &amp; tree shadows sweep across the route in real time.</div>
+<!-- Side action rail -->
+<div id="action-rail">
+  <button class="rail-btn" id="open-tree-ed" title="Edit tree blocks">🌳</button>
+  <button class="rail-btn" id="run-heatmap" title="Compute day-shade heatmap">📊</button>
+  <button class="rail-btn off" id="toggle-heatmap" title="Toggle heatmap layer">👁</button>
+</div>
+
+<!-- Building editor (opens on building click) -->
+<div id="bld-editor" class="editor-panel" style="display:none;">
+  <div class="ep-header">
+    <h3 id="bld-ed-title">Building</h3>
+    <button class="ep-close" id="bld-ed-close">×</button>
+  </div>
+  <div class="ep-body">
+    <div id="bld-ed-meta" class="ep-meta">–</div>
+    <label class="ep-label">Floors</label>
+    <input type="range" id="bld-floors" min="1" max="20" step="1" value="4">
+    <div class="ep-readout">
+      <span id="bld-floors-val">4</span> floors × 4 m =
+      <strong><span id="bld-h-val">16</span> m</strong>
+    </div>
+    <div class="ep-actions">
+      <button class="ep-btn primary" id="bld-ed-save">Save</button>
+      <button class="ep-btn" id="bld-ed-reset">Clear override</button>
+    </div>
+  </div>
+</div>
+
+<!-- Tree blocks editor -->
+<div id="tree-editor" class="editor-panel side" style="display:none;">
+  <div class="ep-header">
+    <h3>Tree blocks</h3>
+    <button class="ep-close" id="tree-ed-close">×</button>
+  </div>
+  <div class="ep-body" id="tree-ed-blocks">
+    <!-- Filled by JS -->
+  </div>
+</div>
+
+<!-- Compute overlay -->
+<div id="compute-overlay" style="display:none;">
+  <div class="co-card">
+    <div class="lring" style="margin-bottom:10px;"></div>
+    <div id="co-text">Computing shade map…</div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#14532d,#16a34a);height:6px;border-radius:3px;"></div>Deep shade</div>
+  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#ca8a04,#fbbf24);height:6px;border-radius:3px;"></div>Partial shade</div>
+  <div class="li"><div class="lc" style="background:linear-gradient(90deg,#dc2626,#f97316);height:6px;border-radius:3px;"></div>Full sun ⚠</div>
+  <div class="li"><div class="lc" style="background:rgba(255,255,255,0.3);height:2px;border-radius:1px;"></div>Cross-streets</div>
+</div>
+
+<!-- Sun position -->
+<div id="sun-pos">
+  <strong id="sp-time">8:00 am</strong>
+  <span id="sp-detail">–</span>
+  <span id="gis-badge" style="display:block; font-size:10px; margin-top:6px; color:rgba(255,255,255,0.5);">… GIS connecting</span>
+</div>
+
+<!-- Bottom info card -->
+<div id="bottom-card">
+  <div id="tip-text">–</div>
+  <div id="shade-bar-wrap">
+    <span id="shade-label">Route shade</span>
+    <div id="shade-bar-bg"><div id="shade-bar-fill" style="width:0%"></div></div>
+    <span id="shade-pct">–</span>
+  </div>
+  <div id="stats-row">
+    <div class="stat">
+      <div class="stat-n" id="st-win">–</div>
+      <div class="stat-l">Best window</div>
+    </div>
+    <div class="stat" style="padding-left:16px;">
+      <div class="stat-n" id="st-bld">–</div>
+      <div class="stat-l">Buildings</div>
+      <div class="stat-l" id="st-bld-sub" style="text-transform:none; letter-spacing:0; opacity:0.7;">–</div>
+    </div>
+    <div class="stat" style="padding-left:16px;">
+      <div class="stat-n" id="st-sun">–</div>
+      <div class="stat-l">Sun altitude</div>
+    </div>
+  </div>
+</div>
 
 <script>
-const MPD = 111320, LAT = 32.064, COS_LAT = Math.cos(LAT * Math.PI / 180);
+/* ══════════════════════════════════════════════════════════
+   EXACT ROTHSCHILD CENTRELINE NODES
+   Source: OSM way 154741757, extracted from Nominatim SVG +
+   cross-referenced with Google Maps / satellite imagery.
+   Boulevard runs NE→SW (Habima→Neve Tzedek).
+   Left-side pedestrian walkway offset ~8m to the NW.
+   ══════════════════════════════════════════════════════════ */
 
-/* Rothschild centreline → left walkway (8 m NW) */
-const CL = [
-  [32.06820,34.77793],[32.06817,34.77792],[32.06672,34.77746],[32.06667,34.77745],
-  [32.06662,34.77743],[32.06593,34.77720],[32.06547,34.77671],[32.06543,34.77667],
-  [32.06438,34.77557],[32.06350,34.77483],[32.06250,34.77400],[32.06150,34.77320],
-  [32.06050,34.77240],[32.05950,34.77170],[32.05860,34.77110],[32.05770,34.77050],
-  [32.05660,34.76990],[32.05560,34.76940],[32.05490,34.76910],
+// These are the actual OSM centreline nodes (from Nominatim SVG path)
+// Note: SVG gives lon/lat so we swap and negate lat
+const CENTRELINE = [
+  [32.06820, 34.77793],  // Habima / north end
+  [32.06817, 34.77792],
+  [32.06672, 34.77746],
+  [32.06667, 34.77745],
+  [32.06662, 34.77743],
+  [32.06593, 34.77720],
+  [32.06547, 34.77671],
+  [32.06543, 34.77667],
+  [32.06438, 34.77557],
+  [32.06350, 34.77483], // approximate continuation SE
+  [32.06250, 34.77400],
+  [32.06150, 34.77320],
+  [32.06050, 34.77240],
+  [32.05950, 34.77170],
+  [32.05860, 34.77110],
+  [32.05770, 34.77050],
+  [32.05660, 34.76990],
+  [32.05560, 34.76940],
+  [32.05490, 34.76910],  // Neve Tzedek / south end
 ];
-const ll = pts => pts.map(p => [p[1], p[0]]);
-function offsetPoly(nodes, m) {
-  return nodes.map((n, i) => {
-    const p = nodes[Math.max(0,i-1)], q = nodes[Math.min(nodes.length-1,i+1)];
-    const perp = Math.atan2((q[1]-p[1])*COS_LAT, q[0]-p[0]) + Math.PI/2;
-    return [n[0]+Math.cos(perp)*m/MPD, n[1]+Math.sin(perp)*m/(MPD*COS_LAT)];
-  });
-}
 
-/* Tree median sections (editable heights) */
-const TREE_SECTIONS = [
-  {name:'Habima – Allenby',from:0,to:2},{name:'Allenby – Gruzenberg',from:2,to:3},
-  {name:'Gruzenberg – Balfour',from:3,to:5},{name:'Balfour – Shenkin',from:5,to:6},
-  {name:'Shenkin – Brenner',from:6,to:8},{name:'Brenner – Herzl',from:8,to:9},
-  {name:"Herzl – Ahad Ha'am",from:9,to:11},{name:"Ahad Ha'am – Shadal",from:11,to:13},
-  {name:'Shadal – Florentin',from:13,to:15},{name:'Florentin – Neve Tzedek',from:15,to:18},
+// Left-side pedestrian walkway = centreline offset ~0.00007° NW
+// Rothschild runs ~NE-SW at ~225°, so left (NW) offset is:
+// dLat ≈ +0.000060, dLon ≈ -0.000045
+function offsetLeft(pts, dLat, dLon) {
+  return pts.map(p => [p[0] + dLat, p[1] + dLon]);
+}
+const WALK_PATH = offsetLeft(CENTRELINE, 0.000055, -0.000040);
+
+// Cross-streets — precise positions on centreline by node index
+const CROSS_STREETS = [
+  { idx: 2,  name: 'Allenby' },
+  { idx: 3,  name: 'Gruzenberg' },
+  { idx: 5,  name: 'Balfour' },
+  { idx: 6,  name: 'Shenkin' },
+  { idx: 8,  name: 'Brenner' },
+  { idx: 9,  name: 'Herzl' },
+  { idx: 11, name: "Ahad Ha'am" },
+  { idx: 13, name: 'Shadal' },
+  { idx: 15, name: 'Florentin' },
 ];
-const treeH = [12,12,12,9,12,12,12,12,12,12];
-function blockRing(pts, innerM, outerM) {
-  const inner = ll(offsetPoly(pts, innerM)), outer = ll(offsetPoly(pts, outerM));
-  return [...inner, ...outer.slice().reverse(), inner[0]];
+
+/* ══════════════════════════════════════════════════════════
+   TREE BLOCKS — between every consecutive crossing.
+   Defaults below; user can override per-block via the editor.
+   Coverage definitions used in the UI:
+     dense   = canopy covers most of the walkway
+     medium  = canopy covers ~50% of the walkway
+     sparse  = canopy covers ~30% of the walkway
+   ══════════════════════════════════════════════════════════ */
+const BLOCK_DEFAULTS = {
+  // keyed by `${startName}→${endName}`
+  'Habima→Allenby':       { density: 'medium',  h: 12 },
+  'Allenby→Gruzenberg':   { density: 'dense',   h: 12 },
+  'Gruzenberg→Balfour':   { density: 'dense',   h: 12 },
+  'Balfour→Shenkin':      { density: 'sparse',  h: 9  },
+  'Shenkin→Brenner':      { density: 'dense',   h: 12 },
+  'Brenner→Herzl':        { density: 'dense',   h: 12 },
+  "Herzl→Ahad Ha'am":     { density: 'medium',  h: 12 },
+  "Ahad Ha'am→Shadal":    { density: 'medium',  h: 12 },
+  'Shadal→Florentin':     { density: 'medium',  h: 12 },
+  'Florentin→Neve Tzedek':{ density: 'sparse',  h: 12 },
+};
+
+/* ══════════════════════════════════════════════════════════
+   OVERRIDES — persisted in localStorage
+   ══════════════════════════════════════════════════════════ */
+const STORAGE_BLD  = 'shade-walk:building-overrides:v1';
+const STORAGE_TREE = 'shade-walk:tree-overrides:v1';
+const FLOOR_M = 4; // user's baseline: 1 floor = 4 m
+
+function loadStore(key) {
+  try { return JSON.parse(localStorage.getItem(key) || '{}'); }
+  catch { return {}; }
 }
-function treesGJ() {
-  return { type:'FeatureCollection', features: TREE_SECTIONS.map((s,i)=>({
-    type:'Feature', id:2000+i, properties:{idx:i, height:treeH[i], name:s.name},
-    geometry:{ type:'Polygon', coordinates:[blockRing(CL.slice(s.from,s.to+1), -4.5, 4.5)] }
-  })) };
+function saveStore(key, obj) {
+  localStorage.setItem(key, JSON.stringify(obj));
 }
-const walkGJ = () => ({ type:'Feature', geometry:{ type:'LineString', coordinates: ll(offsetPoly(CL,8)) } });
+let buildingOverrides = loadStore(STORAGE_BLD);  // { osmId: { floors, h } }
+let treeOverrides     = loadStore(STORAGE_TREE); // { blockKey: { density, h } }
 
-/* Sun — SunCalc */
-const SEASON_DATE = { summer:[2025,6,1,3], spring:[2025,2,21,2], autumn:[2025,8,21,3], winter:[2025,11,21,2] };
-const DIR16 = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-function getSun(hour, season) {
-  const [y,m,d,tz] = SEASON_DATE[season];
-  const hh = Math.floor(hour), mm = hour%1===0.5?30:0;
-  const pos = SunCalc.getPosition(new Date(Date.UTC(y,m,d,hh-tz,mm)), 32.0639, 34.7717);
-  const alt = pos.altitude*180/Math.PI, az = (pos.azimuth*180/Math.PI+180+360)%360;
-  return { alt:Math.round(alt*10)/10, az:Math.round(az), up:alt>0.5, dir:DIR16[Math.round(az/22.5)%16] };
-}
-const fmtH = h => { const hh=Math.floor(h),mm=h%1===0.5?'30':'00',ap=hh<12?'am':'pm',d=hh>12?hh-12:(hh===0?12:hh); return `${d}:${mm} ${ap}`; };
-
-/* Cast a flat ground-shadow polygon from a footprint ring */
-function shadowRing(ring, dLon, dLat) {
-  const shifted = ring.map(([lo,la]) => [lo+dLon, la+dLat]);
-  return [...ring.slice(0,-1), ...shifted.slice(0,-1).reverse(), ring[0]];
-}
-
-const map = new maplibregl.Map({
-  container:'map', style:'https://tiles.openfreemap.org/styles/bright',
-  center:[34.7737,32.0625], zoom:16.2, pitch:55, bearing:18, antialias:true, maxPitch:72
-});
-map.addControl(new maplibregl.NavigationControl(), 'bottom-right');
-
-let hour = 9, season = 'summer', srcLayer = 'building';
-
-map.on('load', () => {
-  const style = map.getStyle();
-  // Identify the vector source + remove the flat building layer (we extrude instead)
-  const srcName = Object.keys(style.sources).find(k => style.sources[k].type === 'vector') || 'openmaptiles';
-  ['building','building-top','building-3d'].forEach(id => { if (map.getLayer(id)) map.removeLayer(id); });
-  const firstSymbol = style.layers.find(l => l.type === 'symbol')?.id;
-
-  // Ground shadows (computed from real footprints) — under everything
-  map.addSource('shadows', { type:'geojson', data:{type:'FeatureCollection',features:[]} });
-  map.addLayer({ id:'shadows', type:'fill', source:'shadows',
-    paint:{ 'fill-color':'#141008', 'fill-opacity':0.22 } }, firstSymbol);
-
-  // 3D buildings — REAL OSM footprints from the vector tiles, extruded by height
-  map.addLayer({ id:'buildings-3d', source:srcName, 'source-layer':'building', type:'fill-extrusion',
-    paint:{
-      'fill-extrusion-color':'#d9d2c5',
-      'fill-extrusion-height':['coalesce',['get','render_height'],['*',['coalesce',['get','building:levels'],4],3.5],14],
-      'fill-extrusion-base':['coalesce',['get','render_min_height'],0],
-      'fill-extrusion-opacity':0.97,
-      'fill-extrusion-ambient-occlusion-intensity':0.4,
-      'fill-extrusion-ambient-occlusion-radius':3
-    } }, firstSymbol);
-
-  // 3D trees
-  map.addSource('trees', { type:'geojson', data:treesGJ() });
-  map.addLayer({ id:'trees-3d', type:'fill-extrusion', source:'trees',
-    paint:{ 'fill-extrusion-color':'#2e6b1f','fill-extrusion-height':['get','height'],
-            'fill-extrusion-base':0,'fill-extrusion-opacity':0.88 } });
-
-  // Route
-  map.addSource('walk', { type:'geojson', data:walkGJ() });
-  map.addLayer({ id:'walk-halo', type:'line', source:'walk', paint:{'line-color':'#fff','line-width':12,'line-opacity':0.75} });
-  map.addLayer({ id:'walk-line', type:'line', source:'walk', paint:{'line-color':'#15803d','line-width':7,'line-cap':'round','line-join':'round'} });
-
-  const wc = ll(offsetPoly(CL,8));
-  addPill(wc[0],'▲ Habima','#15803d'); addPill(wc[wc.length-1],'Neve Tzedek','#666');
-
-  // Tree editor
-  map.on('click','trees-3d', e => {
-    const i = e.features[0].properties.idx;
-    const v = prompt(`Tree height for "${TREE_SECTIONS[i].name}" (metres):`, treeH[i]);
-    const n = parseFloat(v); if (n>0 && n<40){ treeH[i]=n; map.getSource('trees').setData(treesGJ()); refreshShadows(); }
-  });
-  map.on('mouseenter','trees-3d',()=>map.getCanvas().style.cursor='pointer');
-  map.on('mouseleave','trees-3d',()=>map.getCanvas().style.cursor='');
-
-  srcLayer = 'building';
-  map.on('idle', refreshShadows);   // recompute once tiles settle / view changes
-  updateSun();
-});
-
-/* Recompute ground shadows from the real building footprints currently loaded */
-function refreshShadows() {
-  if (!map.getSource('shadows')) return;
-  const sun = getSun(hour, season);
-  if (!sun.up) { map.getSource('shadows').setData({type:'FeatureCollection',features:[]}); return; }
-  const az = sun.az*Math.PI/180, tanA = Math.tan(sun.alt*Math.PI/180);
-  const feats = [];
-
-  // Buildings (real OSM footprints from vector tiles)
-  let bld = [];
-  try { bld = map.querySourceFeatures(map.getLayer('buildings-3d').source, { sourceLayer:'building' }); } catch(_){}
-  const seen = new Set();
-  bld.forEach(f => {
-    if (f.id != null) { if (seen.has(f.id)) return; seen.add(f.id); }
-    const h = f.properties.render_height || (f.properties['building:levels']*3.5) || 14;
-    const len = h/tanA, dLon = -Math.sin(az)*len/(MPD*COS_LAT), dLat = -Math.cos(az)*len/MPD;
-    const polys = f.geometry.type==='MultiPolygon' ? f.geometry.coordinates : [f.geometry.coordinates];
-    polys.forEach(rings => { if (rings[0]?.length>3) feats.push({ type:'Feature',
-      geometry:{ type:'Polygon', coordinates:[shadowRing(rings[0], dLon, dLat)] } }); });
-  });
-
-  // Trees
-  treesGJ().features.forEach(f => {
-    const len = f.properties.height/tanA, dLon=-Math.sin(az)*len/(MPD*COS_LAT), dLat=-Math.cos(az)*len/MPD;
-    feats.push({ type:'Feature', geometry:{ type:'Polygon', coordinates:[shadowRing(f.geometry.coordinates[0], dLon, dLat)] } });
-  });
-
-  map.getSource('shadows').setData({ type:'FeatureCollection', features:feats });
-}
-
-function updateSun() {
-  const sun = getSun(hour, season);
-  if (sun.up) {
-    try { map.setLights([
-      {id:'ambient',type:'ambient',properties:{color:'#fff',intensity:0.3}},
-      {id:'sun',type:'directional',properties:{color:'#fff7da',intensity:0.9,direction:[sun.az,90-sun.alt]}}
-    ]); } catch(_){}
-  } else {
-    try { map.setLights([{id:'ambient',type:'ambient',properties:{color:'#b6c6dd',intensity:0.55}}]); } catch(_){}
+/* Derive block list from cross-streets. Always covers full walkway. */
+function getTreeBlocks() {
+  const crossings = [
+    { idx: 0, name: 'Habima' },
+    ...CROSS_STREETS,
+    { idx: WALK_PATH.length - 1, name: 'Neve Tzedek' }
+  ];
+  const blocks = [];
+  for (let i = 0; i < crossings.length - 1; i++) {
+    const a = crossings[i], b = crossings[i+1];
+    if (b.idx <= a.idx) continue;
+    const key = `${a.name}→${b.name}`;
+    const dflt = BLOCK_DEFAULTS[key] || { density: 'medium', h: 12 };
+    const ovr = treeOverrides[key] || {};
+    blocks.push({
+      key,
+      startIdx: a.idx, endIdx: b.idx,
+      label: key.replace('→', ' → '),
+      density: ovr.density || dflt.density,
+      h:       ovr.h       != null ? ovr.h : dflt.h,
+      override: !!treeOverrides[key],
+    });
   }
-  document.getElementById('sc-time').textContent = '☀ ' + fmtH(hour);
-  document.getElementById('sc-detail').innerHTML = sun.up
-    ? `${sun.alt}° altitude · from ${sun.dir} (${sun.az}°)<br>14m building casts ${Math.round(14/Math.tan(sun.alt*Math.PI/180))}m shadow`
-    : 'Sun below horizon';
-  refreshShadows();
+  return blocks;
 }
 
-function addPill(lngLat, txt, bg) {
-  const el = Object.assign(document.createElement('div'), { textContent:txt,
-    style:`background:${bg};color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:99px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);` });
-  new maplibregl.Marker({ element:el, anchor:'left' }).setLngLat(lngLat).addTo(map);
+const POIS = [
+  { idx: 4,  t: 'bench', name: 'Benches — café zone' },
+  { idx: 5,  t: 'water', name: 'Water fountain' },
+  { idx: 9,  t: 'bench', name: 'Independence Hall benches' },
+  { idx: 11, t: 'water', name: 'Water fountain' },
+  { idx: 13, t: 'bench', name: 'Seating area' },
+  { idx: 15, t: 'bench', name: 'Rest stop' },
+];
+
+/* ══════════════════════════════════════════════════════════
+   SUN MATH — Tel Aviv (32.07°N, 34.78°E)
+   Inputs: a JS Date for the day + local wall-clock hour (decimal).
+   Handles Asia/Jerusalem DST via Intl.
+   ══════════════════════════════════════════════════════════ */
+const DIRS = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+const TLV_LAT = 32.07, TLV_LON = 34.78;
+
+function tlvOffsetHours(date) {
+  // Asia/Jerusalem offset for the given date (handles IDT/DST)
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jerusalem',
+      timeZoneName: 'longOffset',
+      year: 'numeric', month: 'numeric', day: 'numeric'
+    });
+    const tz = fmt.formatToParts(date).find(p => p.type === 'timeZoneName')?.value || 'GMT+02:00';
+    const m = tz.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
+    if (!m) return 2;
+    return (m[1] === '+' ? 1 : -1) * (parseInt(m[2]) + parseInt(m[3] || 0) / 60);
+  } catch { return 2; }
 }
 
-document.getElementById('tsl').addEventListener('input', function(){
-  hour = parseFloat(this.value); document.getElementById('tval').textContent = fmtH(hour);
-  if (map.loaded()) updateSun();
+function dayOfYear(date) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  return Math.floor((date - start) / 86400000);
+}
+
+function getSun(date, localHour) {
+  const doy = dayOfYear(date);
+  // Declination via Cooper's formula
+  const declDeg = 23.45 * Math.sin(2 * Math.PI * (284 + doy) / 365);
+  const decl = declDeg * Math.PI / 180;
+  // Equation of time (Spencer)
+  const B = 2 * Math.PI * (doy - 81) / 365;
+  const eot = 9.87 * Math.sin(2*B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
+  // Longitude correction for civil-time → solar-time
+  const offsetH = tlvOffsetHours(date);
+  const stdMeridian = 15 * offsetH;
+  const solarHour = localHour + (4 * (TLV_LON - stdMeridian) + eot) / 60;
+
+  const ha  = (solarHour - 12) * 15 * Math.PI / 180;
+  const lat = TLV_LAT * Math.PI / 180;
+  const sinA = Math.sin(lat)*Math.sin(decl) + Math.cos(lat)*Math.cos(decl)*Math.cos(ha);
+  const altR = Math.asin(Math.max(-1, Math.min(1, sinA)));
+  const altD = altR * 180 / Math.PI;
+  const cosZ = (Math.sin(decl) - Math.sin(lat)*sinA) / (Math.cos(lat)*Math.cos(altR));
+  let az = Math.acos(Math.max(-1, Math.min(1, cosZ))) * 180 / Math.PI;
+  if (ha > 0) az = 360 - az;
+  return {
+    alt: Math.round(altD * 10) / 10,
+    az:  Math.round(az),
+    len: altD > 0.3 ? 1 / Math.tan(altR) : 30,
+    up:  altD > 0,
+    declDeg, offsetH, eot,
+  };
+}
+
+function seasonToDate(s) {
+  const y = new Date().getFullYear();
+  return { summer: new Date(y, 5, 21), spring: new Date(y, 3, 1),
+           autumn: new Date(y, 9, 1), winter: new Date(y, 11, 21) }[s] || new Date();
+}
+function dateToISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+const fmtH = h => {
+  const hh = Math.floor(h);
+  const mm = Math.round((h - hh) * 60);
+  const mmS = mm.toString().padStart(2, '0');
+  const ap = hh < 12 ? 'am' : 'pm';
+  const d = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+  return `${d}:${mmS} ${ap}`;
+};
+const azDir = az => DIRS[Math.round(az/22.5)%16];
+
+/* ══════════════════════════════════════════════════════════
+   SHADE CALCULATION per segment
+   Combines tree canopy + building shadow
+   Returns 0 (full sun) → 1 (full shade)
+   ══════════════════════════════════════════════════════════ */
+const DENSITY_OPACITY = { dense: 0.85, medium: 0.55, sparse: 0.32 };
+function segmentShade(seg, sun) {
+  const treeOp = DENSITY_OPACITY[seg.density] || 0.4;
+  const heightBonus = seg.h >= 12 ? 1.0 : (seg.h >= 9 ? 0.85 : 0.65);
+  const treeShade = treeOp * heightBonus;
+
+  // Building shadow contribution — strongest in early morning (sun from E/ENE)
+  let bldgShade = 0;
+  if (sun.up) {
+    // West-side buildings (left flank when walking S) shade the walkway
+    // when sun is in the E/ENE (morning) — most impactful 6am–10am
+    if (sun.az < 120) {
+      // Sun from east → W-flank buildings cast shadow across walkway
+      bldgShade = Math.min(0.80, (sun.len * 0.06) * (1 - sun.az/180));
+    } else if (sun.az > 220) {
+      // Sun from SW/W (afternoon) → E-flank buildings shade right side
+      // Less useful for left walkway
+      bldgShade = 0.10;
+    }
+  }
+
+  return Math.min(1.0, treeShade * 0.7 + bldgShade * 0.5 + treeShade * bldgShade * 0.3);
+}
+
+/* ══════════════════════════════════════════════════════════
+   SHADE → COLOUR
+   Dark green = deep shade (good for stroller)
+   Yellow/orange/red = exposed (avoid)
+   ══════════════════════════════════════════════════════════ */
+function shadeToColor(shade) {
+  if (shade > 0.75) return '#15803d'; // deep shade
+  if (shade > 0.55) return '#16a34a'; // good shade
+  if (shade > 0.40) return '#65a30d'; // partial
+  if (shade > 0.25) return '#ca8a04'; // patchy
+  if (shade > 0.12) return '#ea580c'; // mostly sun
+  return '#dc2626';                    // full sun — cross-street exposure
+}
+
+/* ══════════════════════════════════════════════════════════
+   MAP STATE
+   ══════════════════════════════════════════════════════════ */
+let map, routeLyr, shadowLyr, treeLyr, poiLyr, crossLyr, heatmapLyr;
+let buildings = [];
+let hour = 8;
+let currentDate = seasonToDate('summer');
+let gisStatus = 'pending'; // 'ok' | 'offline' | 'pending'
+let sourceCounts = { gis: 0, osm: 0 };
+let editingBuilding = null;
+let shadowSamples = null;     // last computed heatmap samples
+let heatmapVisible = false;
+
+const GIS_PROXY_URL = 'http://localhost:5001';
+
+/* ══════════════════════════════════════════════════════════
+   INIT
+   ══════════════════════════════════════════════════════════ */
+function initMap() {
+  map = L.map('map', {
+    center: [32.0625, 34.7750],
+    zoom: 16,
+    zoomControl: false,
+    attributionControl: true
+  });
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  // Dark tiles to match SunSeekr aesthetic
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> © <a href="https://carto.com">CARTO</a>',
+    subdomains: 'abcd',
+    maxZoom: 19
+  }).addTo(map);
+
+  shadowLyr  = L.layerGroup().addTo(map);
+  treeLyr    = L.layerGroup().addTo(map);
+  crossLyr   = L.layerGroup().addTo(map);
+  routeLyr   = L.layerGroup().addTo(map);
+  heatmapLyr = L.layerGroup();   // not added by default
+  poiLyr     = L.layerGroup().addTo(map);
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW ROUTE — colour-coded by shade per segment
+   This is the SunSeekr-style core visual
+   ══════════════════════════════════════════════════════════ */
+function drawRoute(sun) {
+  routeLyr.clearLayers();
+  const blocks = getTreeBlocks();
+
+  blocks.forEach(blk => {
+    const shade = segmentShade(blk, sun);
+    const color = shadeToColor(shade);
+    const pts = WALK_PATH.slice(blk.startIdx, blk.endIdx + 1);
+    if (pts.length < 2) return;
+
+    L.polyline(pts, {
+      color, weight: 10, opacity: 0.92,
+      lineCap: 'round', lineJoin: 'round',
+      interactive: true
+    })
+    .bindTooltip(
+      `<b>${blk.label}</b><br>` +
+      `Shade: <b>${Math.round(shade*100)}%</b><br>` +
+      `${blk.density} canopy · ${blk.h}m` +
+      (blk.override ? ' <span style="color:#86efac">(edited)</span>' : ''),
+      { className: 'route-tt', sticky: true, offset: [0, -8] }
+    )
+    .addTo(routeLyr);
+
+    L.polyline(pts, {
+      color: 'rgba(255,255,255,0.15)',
+      weight: 12, opacity: 1,
+      lineCap: 'round', interactive: false
+    }).addTo(routeLyr);
+  });
+
+  blocks.forEach(blk => {
+    const shade = segmentShade(blk, sun);
+    const color = shadeToColor(shade);
+    const pts = WALK_PATH.slice(blk.startIdx, blk.endIdx + 1);
+    if (pts.length < 2) return;
+    L.polyline(pts, {
+      color, weight: 8, opacity: 0.95,
+      lineCap: 'round', lineJoin: 'round',
+      interactive: false
+    }).addTo(routeLyr);
+  });
+
+  // Start / end labels
+  const makeLabel = (pt, txt, isStart) => {
+    const ic = L.divIcon({
+      className: '',
+      html: `<div style="
+        background:${isStart ? '#fff' : 'rgba(255,255,255,0.15)'};
+        color:${isStart ? '#000' : '#fff'};
+        border: 1.5px solid rgba(255,255,255,0.4);
+        font-size:11px; font-weight:700;
+        padding:4px 10px; border-radius:99px;
+        white-space:nowrap;
+        box-shadow:0 2px 8px rgba(0,0,0,0.5);
+        backdrop-filter:blur(8px);
+      ">${txt}</div>`,
+      iconAnchor: [40, 10]
+    });
+    L.marker(pt, { icon: ic, interactive: false }).addTo(routeLyr);
+  };
+  makeLabel(WALK_PATH[0], '🏛 Habima', true);
+  makeLabel(WALK_PATH[WALK_PATH.length-1], 'Neve Tzedek', false);
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW CROSS-STREETS — thin perpendicular lines showing gaps
+   ══════════════════════════════════════════════════════════ */
+function drawCrossStreets() {
+  crossLyr.clearLayers();
+  CROSS_STREETS.forEach(({ idx, name }) => {
+    const pt = WALK_PATH[Math.min(idx, WALK_PATH.length-1)];
+    // Small dot at intersection
+    const ic = L.divIcon({
+      className: '',
+      html: `<div style="
+        font-size:9px; color:rgba(255,255,255,0.5);
+        white-space:nowrap; padding:2px 0;
+        text-shadow:0 1px 3px rgba(0,0,0,0.8);
+        pointer-events:none;
+      ">${name}</div>`,
+      iconAnchor: [-6, 6]
+    });
+    L.marker(pt, { icon: ic, interactive: false }).addTo(crossLyr);
+
+    // Short perpendicular dash across the route
+    L.circleMarker(pt, {
+      radius: 5,
+      color: '#fbbf24',
+      fillColor: '#fbbf24',
+      fillOpacity: 0.9,
+      weight: 0,
+      interactive: true
+    })
+    .bindTooltip(`<b>${name} St</b><br>⚠ Fully exposed — cross quickly`, {
+      className: 'route-tt'
+    })
+    .addTo(crossLyr);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW BUILDING SHADOWS — from real OSM footprints
+   ══════════════════════════════════════════════════════════ */
+function drawShadows(sun) {
+  shadowLyr.clearLayers();
+  if (!sun.up) return;
+
+  const az = sun.az * Math.PI/180;
+  const MPD = 111320, latC = Math.cos(32.07 * Math.PI/180);
+  const dLat = -Math.cos(az) * sun.len / MPD;
+  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+
+  buildings.forEach(b => {
+    const resolved = resolveBuildingHeight(b);
+    const h = resolved.h;
+    const sdLat = dLat * h;
+    const sdLon = dLon * h;
+
+    const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+    L.polygon(sp, {
+      fillColor: '#000',
+      fillOpacity: Math.min(0.50, 0.15 + (h/55)*0.35),
+      color: 'transparent',
+      interactive: false
+    }).addTo(shadowLyr);
+
+    const srcColor = resolved.src === 'manual' ? '#60a5fa'
+                    : resolved.src === 'gis' ? '#86efac' : '#fbbf24';
+    L.polygon(b.poly, {
+      fillColor: srcColor,
+      fillOpacity: 0.08,
+      color: srcColor,
+      weight: 0.8,
+      opacity: 0.55,
+    })
+      .bindTooltip(
+        `<b>${b.addr || 'Building #' + b.id}</b><br>` +
+        `Height: <b>${Math.round(h)}m</b><br>` +
+        `Source: <b style="color:${srcColor}">${resolved.src.toUpperCase()}</b><br>` +
+        `<span style="opacity:0.6">${resolved.notes || ''}</span><br>` +
+        `<span style="opacity:0.5; font-size:10px;">Click to edit floors</span>`,
+        { className: 'route-tt', sticky: true }
+      )
+      .on('click', () => openBuildingEditor(b))
+      .addTo(shadowLyr);
+  });
+}
+
+/* Resolve a building's effective height & source, applying override if any. */
+function resolveBuildingHeight(b) {
+  const ovr = buildingOverrides[b.id];
+  if (ovr) {
+    return {
+      h: ovr.h,
+      src: 'manual',
+      notes: `Manual: ${ovr.floors} floors × ${FLOOR_M}m`,
+      floors: ovr.floors,
+    };
+  }
+  return { h: b.h, src: b.src, notes: b.notes, floors: Math.round(b.h / FLOOR_M) };
+}
+
+/* ══════════════════════════════════════════════════════════
+   DRAW POIs
+   ══════════════════════════════════════════════════════════ */
+function drawPOIs() {
+  poiLyr.clearLayers();
+  POIS.forEach(({ idx, t, name }) => {
+    const pt = WALK_PATH[Math.min(idx, WALK_PATH.length-1)];
+    const ic = L.divIcon({
+      className: '',
+      html: `<div style="
+        width:24px;height:24px;
+        background:rgba(255,255,255,0.95);
+        border:1.5px solid rgba(0,0,0,0.2);
+        border-radius:50%;
+        display:flex;align-items:center;justify-content:center;
+        font-size:13px;
+        box-shadow:0 2px 8px rgba(0,0,0,0.4);
+      ">${t==='bench'?'🪑':'💧'}</div>`,
+      iconSize: [24,24], iconAnchor: [12,12]
+    });
+    L.marker(pt, { icon: ic })
+     .bindPopup(`<b>${name}</b>`)
+     .addTo(poiLyr);
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   DYNAMIC SUN-PATH SHADOW ENGINE
+   For every 10-min step from sunrise to sunset, projects each
+   building's footprint along the solar vector and tests whether
+   each walkway sample point falls inside the resulting shadow
+   polygon. Trees contribute fractional shade per sample based
+   on the block's density and canopy height.
+   ══════════════════════════════════════════════════════════ */
+function sampleWalkway(stepM = 5) {
+  const MPD = 111320;
+  const samples = [];
+  for (let i = 0; i < WALK_PATH.length - 1; i++) {
+    const a = WALK_PATH[i], b = WALK_PATH[i+1];
+    const dLat = b[0]-a[0], dLon = b[1]-a[1];
+    const latC = Math.cos(a[0] * Math.PI/180);
+    const distM = Math.hypot(dLat * MPD, dLon * MPD * latC);
+    const n = Math.max(1, Math.ceil(distM / stepM));
+    for (let s = 0; s < n; s++) {
+      const t = s / n;
+      samples.push({
+        lat: a[0] + dLat*t, lon: a[1] + dLon*t,
+        nodeIdx: i + t,
+        shadeSum: 0, daylightSteps: 0
+      });
+    }
+  }
+  const last = WALK_PATH[WALK_PATH.length-1];
+  samples.push({
+    lat: last[0], lon: last[1], nodeIdx: WALK_PATH.length-1,
+    shadeSum: 0, daylightSteps: 0
+  });
+  return samples;
+}
+
+function computeShadowMap(date) {
+  const samples = sampleWalkway(5);
+  const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI/180);
+
+  // Bounding box of the walkway for cheap "nearby" filter (~120 m halo)
+  const lats = samples.map(s => s.lat), lons = samples.map(s => s.lon);
+  const minLat = Math.min(...lats) - 0.0011;
+  const maxLat = Math.max(...lats) + 0.0011;
+  const minLon = Math.min(...lons) - 0.0013;
+  const maxLon = Math.max(...lons) + 0.0013;
+  const nearby = buildings.filter(b => {
+    const c = b.centroid;
+    return c[0] >= minLat && c[0] <= maxLat && c[1] >= minLon && c[1] <= maxLon;
+  });
+
+  const blocks = getTreeBlocks();
+  const sampleBlock = samples.map(s =>
+    blocks.find(b => s.nodeIdx >= b.startIdx && s.nodeIdx <= b.endIdx) || null
+  );
+
+  // 10 minutes = 1/6 hour
+  for (let h = 4; h <= 21; h += 1/6) {
+    const sun = getSun(date, h);
+    if (!sun.up) continue;
+
+    const az = sun.az * Math.PI/180;
+    const dLatRate = -Math.cos(az) * sun.len / MPD;
+    const dLonRate =  Math.sin(az) * sun.len / (MPD * latC);
+
+    const shadowPolys = nearby.map(b => {
+      const hh = resolveBuildingHeight(b).h;
+      const sdLat = dLatRate * hh, sdLon = dLonRate * hh;
+      return [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
+    });
+
+    for (let i = 0; i < samples.length; i++) {
+      const s = samples[i];
+      s.daylightSteps++;
+      const pt = [s.lat, s.lon];
+
+      let bldgShaded = false;
+      for (const poly of shadowPolys) {
+        if (pointInPolygon(pt, poly)) { bldgShaded = true; break; }
+      }
+
+      let treeFrac = 0;
+      const blk = sampleBlock[i];
+      if (blk && sun.alt > 6) {
+        const op = DENSITY_OPACITY[blk.density] || 0.4;
+        const hb = blk.h >= 12 ? 1 : blk.h >= 9 ? 0.85 : 0.65;
+        treeFrac = op * hb;
+      }
+
+      s.shadeSum += bldgShaded ? 1 : treeFrac;
+    }
+  }
+
+  return samples.map(s => ({
+    ...s,
+    shadedFrac: s.daylightSteps > 0 ? s.shadeSum / s.daylightSteps : 0,
+    shadedMinutes: Math.round(s.shadeSum * 10),
+    daylightMinutes: s.daylightSteps * 10,
+  }));
+}
+
+function drawHeatmap(samples) {
+  heatmapLyr.clearLayers();
+  if (!samples) samples = shadowSamples;
+  if (!samples || samples.length < 2) return;
+
+  for (let i = 0; i < samples.length - 1; i++) {
+    const a = samples[i], b = samples[i+1];
+    const frac = (a.shadedFrac + b.shadedFrac) / 2;
+    const color = shadeToColor(frac);
+    L.polyline([[a.lat, a.lon], [b.lat, b.lon]], {
+      color, weight: 14, opacity: 0.88,
+      lineCap: 'butt'
+    })
+    .bindTooltip(
+      `Avg shade: <b>${Math.round(frac*100)}%</b><br>` +
+      `~${Math.round((a.shadedMinutes + b.shadedMinutes)/2)} min of ` +
+      `${Math.round((a.daylightMinutes + b.daylightMinutes)/2)} min daylight`,
+      { className: 'route-tt', sticky: true }
+    )
+    .addTo(heatmapLyr);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   UPDATE ALL
+   ══════════════════════════════════════════════════════════ */
+function updateAll() {
+  const sun = getSun(currentDate, hour);
+  const blocks = getTreeBlocks();
+
+  drawShadows(sun);
+  drawRoute(sun);
+
+  document.getElementById('sp-time').textContent = '☀ ' + fmtH(hour);
+  document.getElementById('sp-detail').textContent = sun.up
+    ? `${sun.alt}° · ${azDir(sun.az)} · UTC+${sun.offsetH}`
+    : 'below horizon';
+
+  let totalShade = 0;
+  blocks.forEach(b => totalShade += segmentShade(b, sun));
+  const avgShade = blocks.length ? totalShade / blocks.length : 0;
+  const pct = Math.round(avgShade * 100);
+  document.getElementById('shade-bar-fill').style.width = pct + '%';
+  document.getElementById('shade-pct').textContent = pct + '%';
+
+  let wins = [];
+  for (let hh = 6; hh <= 19; hh += 0.5) {
+    const s = getSun(currentDate, hh);
+    const avg = blocks.reduce((sum, b) => sum + segmentShade(b, s), 0) / Math.max(1, blocks.length);
+    if (avg > 0.60) wins.push(hh);
+  }
+  document.getElementById('st-win').textContent = wins.length
+    ? `${fmtH(wins[0])}–${fmtH(wins[wins.length-1])}`
+    : 'Early AM';
+  updateBuildingStats();
+  document.getElementById('st-sun').textContent = sun.up ? sun.alt + '°' : 'Set';
+
+  // Tip
+  const tips = {
+    early:     `<strong>Before 9am</strong> — Long shadows from east-facing buildings blanket the full promenade. Best window of the day. Yellow dots mark cross-streets — fully exposed, cross quickly.`,
+    morning:   `<strong>9–11am</strong> — Tree canopy is carrying the shade. Independence Hall stretch and café zone are strongest. Balfour–Shenkin (9m sparse trees) is the weakest patch — walk fast through it.`,
+    midday:    `<strong>Midday–3pm</strong> — Shade shrinks significantly. The tall ficus at nos. 38–56 still give good cover. Consider cutting the walk short or moving to the building-side pavement.`,
+    afternoon: `<strong>After 3pm</strong> — Sun moves to the SW. West facades now shade the right-side pavement. Consider crossing to the other side after Shenkin.`,
+    evening:   `<strong>After 6pm</strong> — Comfortable everywhere, both sides in shade. Best time for a longer walk with Alma. The cafés are at their liveliest.`,
+  };
+  document.getElementById('tip-text').innerHTML =
+    hour<9 ? tips.early : hour<11 ? tips.morning : hour<15 ? tips.midday : hour<18 ? tips.afternoon : tips.evening;
+}
+
+/* ══════════════════════════════════════════════════════════
+   GEOMETRY HELPERS
+   ══════════════════════════════════════════════════════════ */
+function polyCentroid(poly) {
+  const lats = poly.map(p=>p[0]), lons = poly.map(p=>p[1]);
+  return [
+    (Math.min(...lats)+Math.max(...lats))/2,
+    (Math.min(...lons)+Math.max(...lons))/2
+  ];
+}
+
+// Ray-casting point-in-polygon. point = [lat, lon], polygon = [[lat,lon], ...]
+function pointInPolygon(point, polygon) {
+  let inside = false;
+  const x = point[1], y = point[0]; // x=lon, y=lat
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][1], yi = polygon[i][0];
+    const xj = polygon[j][1], yj = polygon[j][0];
+    const intersect = ((yi > y) !== (yj > y)) &&
+      (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+/* ══════════════════════════════════════════════════════════
+   LOAD GIS HEIGHTS from local Flask proxy
+   Each feature has a per-parcel polygon + k_gova → metres.
+   ══════════════════════════════════════════════════════════ */
+async function loadGISHeights() {
+  try {
+    const r = await fetch(`${GIS_PROXY_URL}/heights`, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    if (!Array.isArray(data)) throw new Error('bad response');
+    gisStatus = 'ok';
+    return data.filter(f => f.h && f.poly && f.poly.length > 2);
+  } catch (err) {
+    gisStatus = 'offline';
+    console.warn('GIS proxy unavailable — buildings will only render if OSM has explicit height tags.', err);
+    return [];
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   LOAD BUILDINGS from Overpass, then spatial-match to GIS.
+   Per-building heights only — no plot/block fallback.
+   ══════════════════════════════════════════════════════════ */
+async function loadBuildings() {
+  const q = `[out:json][timeout:30];(way["building"](32.053,34.765,32.074,34.782););out geom;`;
+
+  const overpassP = fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'data=' + encodeURIComponent(q)
+  }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+
+  try {
+    const [osmData, gisFeatures] = await Promise.all([overpassP, loadGISHeights()]);
+
+    // Pre-compute GIS centroids for fast matching
+    const gisIndexed = gisFeatures.map(f => ({
+      ...f,
+      _centroid: polyCentroid(f.poly)
+    }));
+
+    const matched = osmData.elements
+      .filter(e => e.type === 'way' && e.geometry && e.geometry.length > 2)
+      .map(e => {
+        const poly = e.geometry.map(p => [p.lat, p.lon]);
+        const centroid = polyCentroid(poly);
+        const tags = e.tags || {};
+
+        // 1) Try GIS spatial match — OSM centroid inside GIS polygon,
+        //    or GIS centroid inside OSM polygon. Either confirms a 1:1 tie.
+        let gisMatch = null;
+        for (const f of gisIndexed) {
+          if (pointInPolygon(centroid, f.poly) || pointInPolygon(f._centroid, poly)) {
+            gisMatch = f;
+            break;
+          }
+        }
+        if (gisMatch) {
+          return {
+            id: e.id, poly, centroid,
+            h: gisMatch.h,
+            src: 'gis',
+            notes: gisMatch.notes || `TLV GIS grade ${gisMatch.k_gova}`,
+            addr: tags['addr:housenumber']
+              ? `Rothschild ${tags['addr:housenumber']}`
+              : (tags.name || null)
+          };
+        }
+
+        // 2) Try OSM explicit per-building tags
+        const osmH = tags.height
+          ? parseFloat(tags.height)
+          : tags['building:levels']
+            ? parseFloat(tags['building:levels']) * 3.2
+            : null;
+        if (osmH) {
+          return {
+            id: e.id, poly, centroid,
+            h: osmH,
+            src: 'osm',
+            notes: tags.height
+              ? `OSM height=${tags.height}m`
+              : `OSM ${tags['building:levels']} floors × 3.2m`,
+            addr: tags['addr:housenumber']
+              ? `Rothschild ${tags['addr:housenumber']}`
+              : (tags.name || null)
+          };
+        }
+
+        // 3) No per-building height — skip (plot fallback removed).
+        return null;
+      })
+      .filter(Boolean);
+
+    buildings = matched;
+    sourceCounts = {
+      gis: buildings.filter(b => b.src === 'gis').length,
+      osm: buildings.filter(b => b.src === 'osm').length,
+    };
+
+    updateBuildingStats();
+    hideLoading();
+    updateAll();
+
+  } catch(err) {
+    console.error('Building load failed:', err);
+    gisStatus = gisStatus === 'pending' ? 'offline' : gisStatus;
+    updateBuildingStats();
+    hideLoading();
+    updateAll();
+  }
+}
+
+function updateBuildingStats() {
+  const el = document.getElementById('st-bld');
+  el.textContent = buildings.length || '0';
+
+  const sub = document.getElementById('st-bld-sub');
+  if (sub) {
+    if (buildings.length === 0) {
+      sub.textContent = gisStatus === 'offline'
+        ? 'GIS offline · OSM-tagged only'
+        : 'none';
+    } else {
+      sub.textContent = `${sourceCounts.gis} GIS · ${sourceCounts.osm} OSM`;
+    }
+  }
+
+  const badge = document.getElementById('gis-badge');
+  if (badge) {
+    badge.textContent = gisStatus === 'ok'
+      ? '● GIS connected'
+      : gisStatus === 'offline'
+        ? '○ GIS offline'
+        : '… GIS connecting';
+    badge.style.color = gisStatus === 'ok'
+      ? '#86efac'
+      : gisStatus === 'offline' ? '#f87171' : 'rgba(255,255,255,0.5)';
+  }
+}
+
+function hideLoading() {
+  const el = document.getElementById('loading');
+  el.style.opacity = '0';
+  setTimeout(() => { el.style.display = 'none'; }, 500);
+}
+
+/* ══════════════════════════════════════════════════════════
+   CONTROLS
+   ══════════════════════════════════════════════════════════ */
+document.getElementById('tsl').addEventListener('input', function() {
+  // snap slider value to nearest 10-min step
+  hour = Math.round(parseFloat(this.value) * 6) / 6;
+  document.getElementById('tval').textContent = fmtH(hour);
+  updateAll();
 });
-document.querySelectorAll('.sb').forEach(b => b.addEventListener('click', ()=>{
-  document.querySelectorAll('.sb').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); season = b.dataset.s; if (map.loaded()) updateSun();
-}));
+
+document.querySelectorAll('.sb').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    currentDate = seasonToDate(b.dataset.s);
+    document.getElementById('date-pick').value = dateToISO(currentDate);
+    shadowSamples = null;
+    if (heatmapVisible) drawHeatmap(null);
+    updateAll();
+  });
+});
+
+document.getElementById('date-pick').addEventListener('change', function() {
+  const v = this.value;
+  if (!v) return;
+  const [y,m,d] = v.split('-').map(Number);
+  currentDate = new Date(y, m-1, d);
+  document.querySelectorAll('.sb').forEach(x => x.classList.remove('on'));
+  shadowSamples = null;
+  if (heatmapVisible) drawHeatmap(null);
+  updateAll();
+});
+
+/* ══════════════════════════════════════════════════════════
+   BUILDING EDITOR
+   ══════════════════════════════════════════════════════════ */
+function openBuildingEditor(b) {
+  editingBuilding = b;
+  const resolved = resolveBuildingHeight(b);
+  document.getElementById('bld-ed-title').textContent =
+    b.addr || `Building #${b.id}`;
+  document.getElementById('bld-ed-meta').innerHTML =
+    `Current: <strong>${Math.round(resolved.h)} m</strong> from <strong>${resolved.src.toUpperCase()}</strong><br>` +
+    `<span style="opacity:0.7">${resolved.notes || ''}</span>`;
+  const floors = resolved.floors || Math.max(1, Math.round(resolved.h / FLOOR_M));
+  const slider = document.getElementById('bld-floors');
+  slider.value = floors;
+  document.getElementById('bld-floors-val').textContent = floors;
+  document.getElementById('bld-h-val').textContent = floors * FLOOR_M;
+  document.getElementById('bld-editor').style.display = 'block';
+}
+function closeBuildingEditor() {
+  editingBuilding = null;
+  document.getElementById('bld-editor').style.display = 'none';
+}
+document.getElementById('bld-ed-close').addEventListener('click', closeBuildingEditor);
+document.getElementById('bld-floors').addEventListener('input', function() {
+  const f = parseInt(this.value);
+  document.getElementById('bld-floors-val').textContent = f;
+  document.getElementById('bld-h-val').textContent = f * FLOOR_M;
+});
+document.getElementById('bld-ed-save').addEventListener('click', () => {
+  if (!editingBuilding) return;
+  const f = parseInt(document.getElementById('bld-floors').value);
+  buildingOverrides[editingBuilding.id] = { floors: f, h: f * FLOOR_M };
+  saveStore(STORAGE_BLD, buildingOverrides);
+  closeBuildingEditor();
+  shadowSamples = null;
+  if (heatmapVisible) drawHeatmap(null);
+  updateAll();
+});
+document.getElementById('bld-ed-reset').addEventListener('click', () => {
+  if (!editingBuilding) return;
+  delete buildingOverrides[editingBuilding.id];
+  saveStore(STORAGE_BLD, buildingOverrides);
+  closeBuildingEditor();
+  shadowSamples = null;
+  if (heatmapVisible) drawHeatmap(null);
+  updateAll();
+});
+
+/* ══════════════════════════════════════════════════════════
+   TREE BLOCK EDITOR
+   ══════════════════════════════════════════════════════════ */
+const DENSITY_TIP = {
+  dense:  'Canopy covers most of the walkway',
+  medium: 'Canopy covers ~50% of the walkway',
+  sparse: 'Canopy covers ~30% of the walkway',
+};
+function renderTreeEditor() {
+  const root = document.getElementById('tree-ed-blocks');
+  const blocks = getTreeBlocks();
+  root.innerHTML = blocks.map(blk => `
+    <div class="tb-card" data-key="${blk.key}">
+      <h4>${blk.label}${blk.override ? ' <span style="color:#86efac;font-size:9px;">EDITED</span>' : ''}</h4>
+      <div class="tb-density">
+        ${['sparse','medium','dense'].map(d => `
+          <button data-d="${d}" class="${blk.density === d ? 'on' : ''}" title="${DENSITY_TIP[d]}">
+            ${d}
+          </button>
+        `).join('')}
+      </div>
+      <div class="tb-h-readout">
+        <span>Tree height</span>
+        <strong><span class="tb-h-val">${blk.h}</span> m</strong>
+      </div>
+      <input type="range" class="tb-h" min="4" max="18" step="1" value="${blk.h}">
+    </div>
+  `).join('');
+
+  root.querySelectorAll('.tb-card').forEach(card => {
+    const key = card.dataset.key;
+    card.querySelectorAll('.tb-density button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cur = treeOverrides[key] || {};
+        cur.density = btn.dataset.d;
+        cur.h = cur.h != null ? cur.h : parseInt(card.querySelector('.tb-h').value);
+        treeOverrides[key] = cur;
+        saveStore(STORAGE_TREE, treeOverrides);
+        renderTreeEditor();
+        shadowSamples = null;
+        if (heatmapVisible) drawHeatmap(null);
+        updateAll();
+      });
+    });
+    const slider = card.querySelector('.tb-h');
+    const readout = card.querySelector('.tb-h-val');
+    slider.addEventListener('input', () => {
+      readout.textContent = slider.value;
+    });
+    slider.addEventListener('change', () => {
+      const cur = treeOverrides[key] || {};
+      cur.h = parseInt(slider.value);
+      if (!cur.density) {
+        cur.density = card.querySelector('.tb-density button.on')?.dataset.d || 'medium';
+      }
+      treeOverrides[key] = cur;
+      saveStore(STORAGE_TREE, treeOverrides);
+      renderTreeEditor();
+      shadowSamples = null;
+      if (heatmapVisible) drawHeatmap(null);
+      updateAll();
+    });
+  });
+}
+document.getElementById('open-tree-ed').addEventListener('click', () => {
+  const p = document.getElementById('tree-editor');
+  if (p.style.display === 'block') { p.style.display = 'none'; return; }
+  renderTreeEditor();
+  p.style.display = 'block';
+});
+document.getElementById('tree-ed-close').addEventListener('click', () => {
+  document.getElementById('tree-editor').style.display = 'none';
+});
+
+/* ══════════════════════════════════════════════════════════
+   HEATMAP — toggle + compute
+   ══════════════════════════════════════════════════════════ */
+document.getElementById('run-heatmap').addEventListener('click', async () => {
+  document.getElementById('compute-overlay').style.display = 'flex';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    shadowSamples = computeShadowMap(currentDate);
+    heatmapVisible = true;
+    document.getElementById('toggle-heatmap').classList.remove('off');
+    document.getElementById('toggle-heatmap').classList.add('on');
+    if (!map.hasLayer(heatmapLyr)) heatmapLyr.addTo(map);
+    drawHeatmap(shadowSamples);
+  } finally {
+    document.getElementById('compute-overlay').style.display = 'none';
+  }
+});
+document.getElementById('toggle-heatmap').addEventListener('click', () => {
+  heatmapVisible = !heatmapVisible;
+  const btn = document.getElementById('toggle-heatmap');
+  btn.classList.toggle('on', heatmapVisible);
+  btn.classList.toggle('off', !heatmapVisible);
+  if (heatmapVisible) {
+    if (!shadowSamples) {
+      document.getElementById('run-heatmap').click();
+      return;
+    }
+    if (!map.hasLayer(heatmapLyr)) heatmapLyr.addTo(map);
+    drawHeatmap(shadowSamples);
+  } else {
+    if (map.hasLayer(heatmapLyr)) map.removeLayer(heatmapLyr);
+  }
+});
+
+/* ══════════════════════════════════════════════════════════
+   BOOT
+   ══════════════════════════════════════════════════════════ */
+window.addEventListener('load', () => {
+  document.getElementById('tval').textContent = fmtH(hour);
+  document.getElementById('date-pick').value = dateToISO(currentDate);
+  initMap();
+  drawCrossStreets();
+  drawPOIs();
+  setTimeout(() => {
+    map.invalidateSize();
+    loadBuildings();
+  }, 100);
+});
 </script>
+
+<style>
+/* Tooltip for route hover */
+.route-tt {
+  background: rgba(0,0,0,0.85) !important;
+  color: #fff !important;
+  border: 1px solid rgba(255,255,255,0.15) !important;
+  border-radius: 10px !important;
+  font-size: 12px !important;
+  padding: 7px 11px !important;
+  line-height: 1.5 !important;
+  backdrop-filter: blur(8px) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4) !important;
+}
+.route-tt::before { display: none !important; }
+.leaflet-tooltip-bottom.route-tt::before { display: none !important; }
+</style>
 </body>
 </html>
