@@ -605,10 +605,52 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-/* Boulevard polyline straight from CROSSINGS — covers Habima → Herzl
-   end to end. Chunky (only 12 segments) but predictable. */
-function buildBoulevard() {
+/* Boulevard polyline: fetch OSM way 154741757 for the smooth real
+   centreline, then extend it at the ends with the Habima Square and
+   Herzl coords so it spans the entire boulevard, not just the
+   fragment OSM happens to include. */
+async function loadBoulevard() {
+  try {
+    const q = `[out:json][timeout:25];way(154741757);out geom;`;
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const way = (data.elements || []).find(e => e.type === 'way' && e.geometry);
+      if (way && way.geometry.length >= 5) {
+        let poly = way.geometry.map(p => [p.lat, p.lon]);
+
+        // Orient N → S (Habima is north of Herzl).
+        if (poly[0][0] < poly[poly.length - 1][0]) poly.reverse();
+
+        const habima = [CROSSINGS[0].lat, CROSSINGS[0].lon];
+        const herzl  = [CROSSINGS[CROSSINGS.length - 1].lat, CROSSINGS[CROSSINGS.length - 1].lon];
+
+        // Extend the polyline if its endpoints fall short of Habima/Herzl.
+        if (distM(poly[0], habima) > 30) {
+          poly = [habima, ...poly];
+          console.log(`Extended polyline north to Habima (+${Math.round(distM(habima, poly[1]))} m)`);
+        }
+        if (distM(poly[poly.length - 1], herzl) > 30) {
+          poly = [...poly, herzl];
+          console.log(`Extended polyline south to Herzl (+${Math.round(distM(poly[poly.length - 2], herzl))} m)`);
+        }
+        boulevardPolyline = poly;
+        console.log(`Boulevard polyline: ${poly.length} points, ${Math.round(
+          poly.reduce((s, p, i) => i ? s + distM(poly[i-1], p) : 0, 0)
+        )} m`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('OSM way 154741757 fetch failed:', err);
+  }
   boulevardPolyline = CROSSINGS.map(c => [c.lat, c.lon]);
+  console.log('Using CROSSINGS fallback (12 chunky segments)');
 }
 
 async function loadBuildings() {
@@ -997,7 +1039,7 @@ window.addEventListener('load', () => {
   initMap();
   setTimeout(async () => {
     map.invalidateSize();
-    buildBoulevard();
+    await loadBoulevard();
     await loadBuildings();
   }, 100);
 });
