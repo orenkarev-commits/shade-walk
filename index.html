@@ -466,13 +466,10 @@ function getTreeBlocks() {
 /* Tree centres evenly spaced along the block — TWO rows, one on each
    side of the centreline, offset perpendicular to the boulevard
    bearing by ~ROW_OFFSET_M. */
-/* Trees flank the median (the central walkable strip between the two
-   Rothschild car roads). The OSM polyline we follow is one of those
-   car roads, so BOTH tree rows are offset to the *median side* of the
-   polyline — not symmetric around it. */
-const ROW_INNER_M = 4;   // nearer tree row, on the median's road-side edge
-const ROW_OUTER_M = 14;  // farther tree row, on the median's far edge
-const MEDIAN_SIDE = 1;   // perpendicular handedness; flip to -1 if trees come out on the wrong side
+/* The polyline IS the median centreline (built from CROSSINGS).
+   Tree rows are symmetric ±ROW_OFFSET_M from it, on the two median
+   edges. Rothschild's central strip is ~12-15 m wide. */
+const ROW_OFFSET_M = 6;
 
 /* Distance in metres between two [lat, lon] points. */
 function distM(a, b) {
@@ -508,17 +505,15 @@ function placeTreesAlongSegment(segment, spacing) {
     const segLen = Math.hypot(dN, dE);
     if (segLen < 0.001) continue;
     const bearing = Math.atan2(dE, dN);
-    const perp = bearing + MEDIAN_SIDE * Math.PI / 2;
-    const innerLat = (Math.cos(perp) * ROW_INNER_M) / MPD;
-    const innerLon = (Math.sin(perp) * ROW_INNER_M) / (MPD * latC);
-    const outerLat = (Math.cos(perp) * ROW_OUTER_M) / MPD;
-    const outerLon = (Math.sin(perp) * ROW_OUTER_M) / (MPD * latC);
+    const perp = bearing - Math.PI / 2;
+    const offLat = (Math.cos(perp) * ROW_OFFSET_M) / MPD;
+    const offLon = (Math.sin(perp) * ROW_OFFSET_M) / (MPD * latC);
     while (nextAt <= accum + segLen) {
       const t = (nextAt - accum) / segLen;
       const cx = p1[0] + (p2[0] - p1[0]) * t;
       const cy = p1[1] + (p2[1] - p1[1]) * t;
-      positions.push([cx + innerLat, cy + innerLon]); // road-edge row
-      positions.push([cx + outerLat, cy + outerLon]); // far-edge row
+      positions.push([cx + offLat, cy + offLon]);
+      positions.push([cx - offLat, cy - offLon]);
       nextAt += spacing;
     }
     accum += segLen;
@@ -610,50 +605,14 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-async function loadBoulevard() {
-  // Pull every Rothschild-named way with its tags so we can prefer
-  // the pedestrian/cycle median strip over the two car roads.
-  const q = `[out:json][timeout:25];
-    (
-      way["highway"]["name"~"רוטשילד"](32.05,34.76,32.08,34.79);
-      way["highway"]["name:en"~"Rothschild",i](32.05,34.76,32.08,34.79);
-    );
-    out tags geom;`;
-  try {
-    const r = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q),
-      signal: AbortSignal.timeout(30000),
-    });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const data = await r.json();
-    const allWays = (data.elements || []).filter(e =>
-      e.type === 'way' && e.geometry && e.geometry.length >= 2
-    );
-    if (!allWays.length) { console.warn('No Rothschild way found in OSM'); return; }
-
-    console.log('Rothschild ways:',
-      allWays.map(w => ({ id: w.id, highway: w.tags?.highway, name: w.tags?.name, n: w.geometry.length }))
-    );
-
-    // Use the single longest matched way as the boulevard polyline.
-    // Chaining multiple road segments tends to zigzag between the two
-    // parallel car roads; one long segment is more reliable.
-    const longest = allWays.reduce(
-      (best, cur) => cur.geometry.length > best.geometry.length ? cur : best, allWays[0]
-    );
-    boulevardPolyline = longest.geometry.map(p => [p.lat, p.lon]);
-    console.log(`Using way ${longest.id} (${longest.tags?.highway}): ${boulevardPolyline.length} points, ${Math.round(
-      boulevardPolyline.reduce((s, p, i) => i ? s + distM(boulevardPolyline[i-1], p) : 0, 0)
-    )} m`);
-    L.polyline(boulevardPolyline, {
-      color: '#6b7280', weight: 1.5, opacity: 0.5,
-      dashArray: '4,4', interactive: false,
-    }).addTo(map);
-  } catch (err) {
-    console.warn('Boulevard fetch failed:', err);
-  }
+/* Build the boulevard polyline from the CROSSINGS array. Reliable,
+   no OSM lookup that can land on the wrong tagged way. */
+function buildBoulevard() {
+  boulevardPolyline = CROSSINGS.map(c => [c.lat, c.lon]);
+  L.polyline(boulevardPolyline, {
+    color: '#6b7280', weight: 1.5, opacity: 0.5,
+    dashArray: '4,4', interactive: false,
+  }).addTo(map);
 }
 
 async function loadBuildings() {
@@ -1042,7 +1001,7 @@ window.addEventListener('load', () => {
   initMap();
   setTimeout(async () => {
     map.invalidateSize();
-    await loadBoulevard();
+    buildBoulevard();
     await loadBuildings();
   }, 100);
 });
