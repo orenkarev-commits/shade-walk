@@ -298,18 +298,18 @@ const LANDMARK_TOWERS = [
    nearest vertex on the OSM polyline. The CURVE matters, not the
    exact coords. */
 const CROSSINGS = [
-  { name: 'Habima Square',    lat: 32.07350, lon: 34.77790 }, // north terminus
-  { name: 'Hashmonaim',       lat: 32.07150, lon: 34.77770 },
-  { name: 'Bar Ilan',         lat: 32.07000, lon: 34.77745 },
-  { name: 'Sheinkin',         lat: 32.06820, lon: 34.77700 },
-  { name: 'Balfour',          lat: 32.06650, lon: 34.77640 },
-  { name: 'Mazeh',            lat: 32.06450, lon: 34.77550 },
-  { name: 'Nahmani',          lat: 32.06320, lon: 34.77470 },
-  { name: 'Betzalel Yaffe',   lat: 32.06220, lon: 34.77400 },
-  { name: 'Yavne',            lat: 32.06130, lon: 34.77330 },
-  { name: 'Allenby',          lat: 32.06040, lon: 34.77260 },
-  { name: 'Nahalat Binyamin', lat: 32.05950, lon: 34.77180 },
-  { name: 'Herzl',            lat: 32.05880, lon: 34.77100 }, // south terminus
+  { name: 'Habima Square',    lat: 32.07280, lon: 34.77790 }, // north terminus
+  { name: 'Hashmonaim',       lat: 32.07171, lon: 34.77740 },
+  { name: 'Bar Ilan',         lat: 32.07062, lon: 34.77690 },
+  { name: 'Sheinkin',         lat: 32.06953, lon: 34.77640 },
+  { name: 'Balfour',          lat: 32.06844, lon: 34.77590 },
+  { name: 'Mazeh',            lat: 32.06735, lon: 34.77540 },
+  { name: 'Nahmani',          lat: 32.06626, lon: 34.77490 },
+  { name: 'Betzalel Yaffe',   lat: 32.06517, lon: 34.77440 },
+  { name: 'Yavne',            lat: 32.06408, lon: 34.77390 },
+  { name: 'Allenby',          lat: 32.06299, lon: 34.77340 },
+  { name: 'Nahalat Binyamin', lat: 32.06190, lon: 34.77290 },
+  { name: 'Herzl',            lat: 32.06080, lon: 34.77240 }, // south terminus
 ];
 
 const DENSITY_FACTOR  = { none: 0,        sparse: 0.32, medium: 0.55, dense: 0.85 };
@@ -597,10 +597,31 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-/* Build the boulevard polyline from CROSSINGS — used internally for
-   tree placement. No visible line is drawn for it. */
-function buildBoulevard() {
+/* Boulevard polyline: try the known OSM way ID for Rothschild
+   directly; fall back to the CROSSINGS approximation if unavailable. */
+async function loadBoulevard() {
+  try {
+    const q = `[out:json][timeout:25];way(154741757);out geom;`;
+    const r = await fetch('https://overpass-api.de/api/interpreter', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'data=' + encodeURIComponent(q),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (r.ok) {
+      const data = await r.json();
+      const way = (data.elements || []).find(e => e.type === 'way' && e.geometry);
+      if (way && way.geometry.length >= 5) {
+        boulevardPolyline = way.geometry.map(p => [p.lat, p.lon]);
+        console.log(`OSM way 154741757: ${boulevardPolyline.length} points`);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn('OSM way 154741757 fetch failed:', err);
+  }
   boulevardPolyline = CROSSINGS.map(c => [c.lat, c.lon]);
+  console.log('Using CROSSINGS fallback');
 }
 
 async function loadBuildings() {
@@ -989,7 +1010,7 @@ window.addEventListener('load', () => {
   initMap();
   setTimeout(async () => {
     map.invalidateSize();
-    buildBoulevard();
+    await loadBoulevard();
     await loadBuildings();
   }, 100);
 });
