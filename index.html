@@ -345,6 +345,38 @@ function polyCentroid(poly) {
     (Math.min(...lons) + Math.max(...lons)) / 2,
   ];
 }
+/* Andrew's monotone-chain convex hull in [lat, lon] space.
+   Lat/lon scales are close enough at this latitude for the hull
+   to come out right visually. */
+function convexHull(points) {
+  if (points.length < 3) return points.slice();
+  const pts = points.slice().sort((a, b) => a[1] - b[1] || a[0] - b[0]);
+  const cross = (O, A, B) =>
+    (A[1] - O[1]) * (B[0] - O[0]) - (A[0] - O[0]) * (B[1] - O[1]);
+  const lower = [];
+  for (const p of pts) {
+    while (lower.length >= 2 &&
+           cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 &&
+           cross(upper[upper.length-2], upper[upper.length-1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  lower.pop(); upper.pop();
+  return lower.concat(upper);
+}
+
+/* Shadow envelope: hull of (footprint ∪ footprint translated by sun vector × height). */
+function castShadow(poly, h, dLat, dLon) {
+  const sdLat = dLat * h, sdLon = dLon * h;
+  const translated = poly.map(p => [p[0] + sdLat, p[1] + sdLon]);
+  return convexHull([...poly, ...translated]);
+}
+
 function blockPolygon(blk, widthM = 12) {
   const MPD = 111320;
   const latC = Math.cos(TLV_LAT * Math.PI / 180);
@@ -503,9 +535,8 @@ function updateShadows() {
 
   buildings.forEach(b => {
     const h = resolveBuildingHeight(b).h;
-    const sdLat = dLat * h, sdLon = dLon * h;
-    const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
-    L.polygon(sp, {
+    const env = castShadow(b.poly, h, dLat, dLon);
+    L.polygon(env, {
       fillColor: '#0b0f19',
       fillOpacity: Math.min(0.55, 0.25 + (h/55)*0.30),
       color: 'transparent', interactive: false
@@ -540,9 +571,8 @@ async function runHeatmap() {
       const dLon =  Math.sin(az) * sun.len / (MPD * latC);
 
       for (const b of bldgs) {
-        const sdLat = dLat * b.h, sdLon = dLon * b.h;
-        const sp = [...b.poly, ...b.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
-        L.polygon(sp, {
+        const env = castShadow(b.poly, b.h, dLat, dLon);
+        L.polygon(env, {
           renderer, fillColor: '#0b0f19', fillOpacity: 0.035,
           color: 'transparent', interactive: false
         }).addTo(heatmapLyr);
@@ -550,9 +580,8 @@ async function runHeatmap() {
       for (const t of blocks) {
         const dens = DENSITY_FACTOR[t.blk.density] || 0.4;
         const hb = t.blk.h >= 12 ? 1 : t.blk.h >= 9 ? 0.85 : 0.65;
-        const sdLat = dLat * t.blk.h, sdLon = dLon * t.blk.h;
-        const sp = [...t.poly, ...t.poly.map(p => [p[0]+sdLat, p[1]+sdLon]).reverse()];
-        L.polygon(sp, {
+        const env = castShadow(t.poly, t.blk.h, dLat, dLon);
+        L.polygon(env, {
           renderer, fillColor: '#14532d', fillOpacity: 0.035 * dens * hb,
           color: 'transparent', interactive: false
         }).addTo(heatmapLyr);
