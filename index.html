@@ -297,9 +297,9 @@ const LANDMARK_TOWERS = [
    These are only used as hints — each crossing is snapped to the
    nearest vertex on the OSM polyline. The CURVE matters, not the
    exact coords. */
-const CROSSINGS = [
-  { name: 'Habima Square',    lat: 32.07280, lon: 34.77790 }, // north terminus
-  { name: 'Hashmonaim',       lat: 32.07171, lon: 34.77740 },
+let CROSSINGS = [
+  { name: 'Habima Square',    lat: 32.072005, lon: 34.779269 }, // north terminus (user-provided)
+  { name: 'Hashmonaim',       lat: 32.070462, lon: 34.778764 }, // user-provided
   { name: 'Bar Ilan',         lat: 32.07062, lon: 34.77690 },
   { name: 'Sheinkin',         lat: 32.06953, lon: 34.77640 },
   { name: 'Balfour',          lat: 32.06844, lon: 34.77590 },
@@ -311,6 +311,22 @@ const CROSSINGS = [
   { name: 'Nahalat Binyamin', lat: 32.06190, lon: 34.77290 },
   { name: 'Herzl',            lat: 32.06080, lon: 34.77240 }, // south terminus
 ];
+
+/* OSM name patterns (Hebrew + English) for each crossing.
+   Used to find the actual intersection node on the Rothschild way. */
+const CROSSING_PATTERNS = {
+  'Hashmonaim':      'החשמונאים|Hashmonaim',
+  'Bar Ilan':        'בר.אילן|Bar.Ilan',
+  'Sheinkin':        'שינקין|Sheinkin',
+  'Balfour':         'בלפור|Balfour',
+  'Mazeh':           'מאז.ה|Mazeh',
+  'Nahmani':         'נחמני|Nahmani|Nachmani',
+  'Betzalel Yaffe':  'בצלאל.יפה|Betzalel|Bezalel',
+  'Yavne':           'יבנה|Yavne',
+  'Allenby':         'אלנבי|Allenby',
+  'Nahalat Binyamin':'נחלת.בנימין|Nahalat|Nachalat',
+  'Herzl':           'הרצל|Herzl',
+};
 
 const DENSITY_FACTOR  = { none: 0,        sparse: 0.32, medium: 0.55, dense: 0.85 };
 const TREE_SPACING_M  = { none: Infinity, sparse: 20,   medium: 12,   dense: 8   };
