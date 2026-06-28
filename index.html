@@ -605,10 +605,14 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-/* Boulevard polyline: fetch OSM way 154741757 for the smooth real
-   centreline, then extend it at the ends with the Habima Square and
-   Herzl coords so it spans the entire boulevard, not just the
-   fragment OSM happens to include. */
+/* Boulevard polyline:
+   1. Fetch OSM way 154741757 — the smooth real centreline of the
+      middle stretch of Rothschild.
+   2. Clip its south end at Herzl (the way extends past Herzl into
+      Yehuda HaLevi, but the boulevard ends at Herzl).
+   3. Stitch the northward CROSSINGS waypoints onto the start so the
+      polyline curves NW into Habima Square instead of going straight
+      north through buildings. */
 async function loadBoulevard() {
   try {
     const q = `[out:json][timeout:25];way(154741757);out geom;`;
@@ -622,26 +626,34 @@ async function loadBoulevard() {
       const data = await r.json();
       const way = (data.elements || []).find(e => e.type === 'way' && e.geometry);
       if (way && way.geometry.length >= 5) {
-        let poly = way.geometry.map(p => [p.lat, p.lon]);
+        let osmPoly = way.geometry.map(p => [p.lat, p.lon]);
+        if (osmPoly[0][0] < osmPoly[osmPoly.length - 1][0]) osmPoly.reverse(); // N→S
 
-        // Orient N → S (Habima is north of Herzl).
-        if (poly[0][0] < poly[poly.length - 1][0]) poly.reverse();
+        const herzl = [CROSSINGS[CROSSINGS.length - 1].lat, CROSSINGS[CROSSINGS.length - 1].lon];
 
-        const habima = [CROSSINGS[0].lat, CROSSINGS[0].lon];
-        const herzl  = [CROSSINGS[CROSSINGS.length - 1].lat, CROSSINGS[CROSSINGS.length - 1].lon];
-
-        // Extend the polyline if its endpoints fall short of Habima/Herzl.
-        if (distM(poly[0], habima) > 30) {
-          poly = [habima, ...poly];
-          console.log(`Extended polyline north to Habima (+${Math.round(distM(habima, poly[1]))} m)`);
+        // Clip south: discard OSM vertices past Herzl latitude.
+        let clipIdx = osmPoly.length;
+        for (let i = osmPoly.length - 1; i >= 0; i--) {
+          if (osmPoly[i][0] >= herzl[0]) { clipIdx = i + 1; break; }
         }
-        if (distM(poly[poly.length - 1], herzl) > 30) {
-          poly = [...poly, herzl];
-          console.log(`Extended polyline south to Herzl (+${Math.round(distM(poly[poly.length - 2], herzl))} m)`);
-        }
-        boulevardPolyline = poly;
-        console.log(`Boulevard polyline: ${poly.length} points, ${Math.round(
-          poly.reduce((s, p, i) => i ? s + distM(poly[i-1], p) : 0, 0)
+        osmPoly = osmPoly.slice(0, clipIdx);
+
+        // North extension: find the CROSSING closest to OSM start, take all
+        // CROSSINGS north of it as the curving extension up to Habima.
+        let startCrossingIdx = 0, minDist = Infinity;
+        CROSSINGS.forEach((c, i) => {
+          const d = distM([c.lat, c.lon], osmPoly[0]);
+          if (d < minDist) { minDist = d; startCrossingIdx = i; }
+        });
+        const northExtension = CROSSINGS.slice(0, startCrossingIdx)
+          .map(c => [c.lat, c.lon]);
+
+        // South: snap the last point to exactly Herzl if it isn't already.
+        const southCap = (distM(osmPoly[osmPoly.length - 1], herzl) > 30) ? [herzl] : [];
+
+        boulevardPolyline = [...northExtension, ...osmPoly, ...southCap];
+        console.log(`Polyline: ${northExtension.length} N-ext + ${osmPoly.length} OSM + ${southCap.length} S-cap = ${boulevardPolyline.length} pts, ${Math.round(
+          boulevardPolyline.reduce((s, p, i) => i ? s + distM(boulevardPolyline[i-1], p) : 0, 0)
         )} m`);
         return;
       }
