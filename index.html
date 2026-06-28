@@ -621,64 +621,12 @@ const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
-/* Boulevard polyline:
-   1. Fetch OSM way 154741757 — the smooth real centreline of the
-      middle stretch of Rothschild.
-   2. Clip its south end at Herzl (the way extends past Herzl into
-      Yehuda HaLevi, but the boulevard ends at Herzl).
-   3. Stitch the northward CROSSINGS waypoints onto the start so the
-      polyline curves NW into Habima Square instead of going straight
-      north through buildings. */
-async function loadBoulevard() {
-  try {
-    const q = `[out:json][timeout:25];way(154741757);out geom;`;
-    const r = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'data=' + encodeURIComponent(q),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (r.ok) {
-      const data = await r.json();
-      const way = (data.elements || []).find(e => e.type === 'way' && e.geometry);
-      if (way && way.geometry.length >= 5) {
-        let osmPoly = way.geometry.map(p => [p.lat, p.lon]);
-        if (osmPoly[0][0] < osmPoly[osmPoly.length - 1][0]) osmPoly.reverse(); // N→S
-
-        const herzl = [CROSSINGS[CROSSINGS.length - 1].lat, CROSSINGS[CROSSINGS.length - 1].lon];
-
-        // Clip south: discard OSM vertices past Herzl latitude.
-        let clipIdx = osmPoly.length;
-        for (let i = osmPoly.length - 1; i >= 0; i--) {
-          if (osmPoly[i][0] >= herzl[0]) { clipIdx = i + 1; break; }
-        }
-        osmPoly = osmPoly.slice(0, clipIdx);
-
-        // North extension: find the CROSSING closest to OSM start, take all
-        // CROSSINGS north of it as the curving extension up to Habima.
-        let startCrossingIdx = 0, minDist = Infinity;
-        CROSSINGS.forEach((c, i) => {
-          const d = distM([c.lat, c.lon], osmPoly[0]);
-          if (d < minDist) { minDist = d; startCrossingIdx = i; }
-        });
-        const northExtension = CROSSINGS.slice(0, startCrossingIdx)
-          .map(c => [c.lat, c.lon]);
-
-        // South: snap the last point to exactly Herzl if it isn't already.
-        const southCap = (distM(osmPoly[osmPoly.length - 1], herzl) > 30) ? [herzl] : [];
-
-        boulevardPolyline = [...northExtension, ...osmPoly, ...southCap];
-        console.log(`Polyline: ${northExtension.length} N-ext + ${osmPoly.length} OSM + ${southCap.length} S-cap = ${boulevardPolyline.length} pts, ${Math.round(
-          boulevardPolyline.reduce((s, p, i) => i ? s + distM(boulevardPolyline[i-1], p) : 0, 0)
-        )} m`);
-        return;
-      }
-    }
-  } catch (err) {
-    console.warn('OSM way 154741757 fetch failed:', err);
-  }
+/* Boulevard polyline straight from the user-supplied CROSSINGS coords.
+   All 12 points are ground-truth lat/lons, so no OSM stitching is
+   needed (and it was actively hurting accuracy in the middle stretch). */
+function buildBoulevard() {
   boulevardPolyline = CROSSINGS.map(c => [c.lat, c.lon]);
-  console.log('Using CROSSINGS fallback (12 chunky segments)');
+  console.log(`Boulevard: ${boulevardPolyline.length} ground-truth crossings`);
 }
 
 async function loadBuildings() {
@@ -1067,7 +1015,7 @@ window.addEventListener('load', () => {
   initMap();
   setTimeout(async () => {
     map.invalidateSize();
-    await loadBoulevard();
+    buildBoulevard();
     await loadBuildings();
   }, 100);
 });
