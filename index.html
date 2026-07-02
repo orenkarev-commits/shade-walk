@@ -206,12 +206,14 @@
 
 <div id="rail">
   <button class="rail-btn" id="open-trees" title="Edit tree blocks">🌳</button>
+  <button class="rail-btn" id="best-path" title="Show the shadiest side at this time">🧭</button>
   <button class="rail-btn" id="toggle-heatmap" title="Toggle day-shade heatmap">👁</button>
 </div>
 
 <div id="status">
   <div><span class="dot" id="gis-dot"></span><span id="gis-text">Connecting to TLV GIS…</span></div>
   <div id="bld-count" style="opacity:0.6; margin-top:4px;"></div>
+  <div id="best-path-out" style="display:none; margin-top:6px; padding-top:6px; border-top:1px solid rgba(0,0,0,0.08); font-weight:600;"></div>
 </div>
 
 <div class="panel" id="bld-panel">
@@ -804,6 +806,131 @@ function updateShadows() {
    For each 10-min step, project each footprint + each tree-block
    canopy along the solar vector at low alpha. Stacking gives a
    shadow-duration heatmap with no extra computation. */
+/* ───── Shadiest-path analyzer ─────
+   Generates east and west walking paths (offset perpendicular to
+   the boulevard centreline), samples each at 3 m intervals, and
+   for the current sun position counts what fraction of samples
+   fall inside a building shadow (binary) or a tree shadow
+   (weighted by density). Higher fraction = shadier path. */
+const WALK_OFFSET_M = 10;
+let bestPathLayer = null;
+
+function offsetPolyline(polyline, offsetM) {
+  const MPD = 111320;
+  const latC = Math.cos(TLV_LAT * Math.PI / 180);
+  const out = [];
+  for (let i = 0; i < polyline.length; i++) {
+    const prev = polyline[Math.max(0, i - 1)];
+    const next = polyline[Math.min(polyline.length - 1, i + 1)];
+    const dN = (next[0] - prev[0]) * MPD;
+    const dE = (next[1] - prev[1]) * MPD * latC;
+    const bearing = Math.atan2(dE, dN);
+    const perp = bearing - Math.PI / 2;
+    const offLat = (Math.cos(perp) * offsetM) / MPD;
+    const offLon = (Math.sin(perp) * offsetM) / (MPD * latC);
+    out.push([polyline[i][0] + offLat, polyline[i][1] + offLon]);
+  }
+  return out;
+}
+
+function samplePolyline(polyline, stepM = 3) {
+  const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI / 180);
+  const samples = [];
+  for (let i = 0; i < polyline.length - 1; i++) {
+    const p1 = polyline[i], p2 = polyline[i + 1];
+    const dN = (p2[0] - p1[0]) * MPD;
+    const dE = (p2[1] - p1[1]) * MPD * latC;
+    const segLen = Math.hypot(dN, dE);
+    const n = Math.max(1, Math.ceil(segLen / stepM));
+    for (let s = 0; s < n; s++) {
+      const t = s / n;
+      samples.push([
+        p1[0] + (p2[0] - p1[0]) * t,
+        p1[1] + (p2[1] - p1[1]) * t,
+      ]);
+    }
+  }
+  samples.push(polyline[polyline.length - 1]);
+  return samples;
+}
+
+function computePathShade(path, sun) {
+  if (!sun.up || sun.alt < 1) return 0;
+  const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI / 180);
+  const az = sun.az * Math.PI / 180;
+  const dLat = -Math.cos(az) * sun.len / MPD;
+  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+
+  const buildingShadows = buildings.map(b => {
+    const h = resolveBuildingHeight(b).h;
+    return castShadow(b.poly, h, dLat, dLon);
+  });
+
+  const treeShadows = [];
+  getTreeBlocks().forEach(blk => {
+    if (blk.density === 'none') return;
+    const r = blk.canopy / 2;
+    const dens = DENSITY_FACTOR[blk.density] || 0;
+    getTreePositions(blk).forEach(pos => {
+      const canopyPoly = circlePolygon(pos, r, 12);
+      treeShadows.push({ env: castShadow(canopyPoly, blk.h, dLat, dLon), density: dens });
+    });
+  });
+
+  const samples = samplePolyline(path, 3);
+  let total = 0;
+  for (const pt of samples) {
+    if (buildingShadows.some(poly => pointInPolygon(pt, poly))) { total += 1; continue; }
+    let treeS = 0;
+    for (const t of treeShadows) {
+      if (pointInPolygon(pt, t.env)) treeS = Math.max(treeS, t.density);
+    }
+    total += treeS;
+  }
+  return total / samples.length;
+}
+
+function showShadiestPath() {
+  if (bestPathLayer) { map.removeLayer(bestPathLayer); bestPathLayer = null; }
+  const out = document.getElementById('best-path-out');
+  const btn = document.getElementById('best-path');
+
+  if (btn.classList.contains('on')) {
+    btn.classList.remove('on');
+    out.style.display = 'none';
+    return;
+  }
+
+  const sun = getSun(currentDate, hour);
+  if (!sun.up || sun.alt < 1) {
+    out.style.display = 'block';
+    out.innerHTML = '☾ Sun is below the horizon — everywhere is shade.';
+    btn.classList.add('on');
+    return;
+  }
+
+  const east = offsetPolyline(boulevardPolyline, +WALK_OFFSET_M);
+  const west = offsetPolyline(boulevardPolyline, -WALK_OFFSET_M);
+  const eastShade = computePathShade(east, sun);
+  const westShade = computePathShade(west, sun);
+
+  const better = eastShade >= westShade ? { name: 'East side', path: east, shade: eastShade } : { name: 'West side', path: west, shade: westShade };
+  const other  = eastShade >= westShade ? { name: 'West side', shade: westShade } : { name: 'East side', shade: eastShade };
+
+  bestPathLayer = L.polyline(better.path, {
+    color: '#16a34a', weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round',
+    interactive: false,
+  }).addTo(map);
+
+  out.style.display = 'block';
+  out.innerHTML =
+    `🧭 <span style="color:#15803d">${better.name}</span> at ${fmtTime(hour)}<br>` +
+    `<span style="font-weight:400; opacity:0.7">` +
+    `${Math.round(better.shade * 100)}% shade · other side ${Math.round(other.shade * 100)}%` +
+    `</span>`;
+  btn.classList.add('on');
+}
+
 async function runHeatmap() {
   document.getElementById('computing').style.display = 'flex';
   await new Promise(r => setTimeout(r, 30));
@@ -985,6 +1112,10 @@ const dateToISO = d =>
 document.getElementById('time-slider').addEventListener('input', (e) => {
   hour = Math.round(parseFloat(e.target.value) * 6) / 6;
   updateShadows();
+  if (document.getElementById('best-path').classList.contains('on')) {
+    document.getElementById('best-path').classList.remove('on');
+    showShadiestPath();
+  }
 });
 document.getElementById('date-pick').addEventListener('change', (e) => {
   if (!e.target.value) return;
@@ -995,6 +1126,7 @@ document.getElementById('date-pick').addEventListener('change', (e) => {
   if (heatmapOn) runHeatmap();
 });
 document.getElementById('run-shade').addEventListener('click', runHeatmap);
+document.getElementById('best-path').addEventListener('click', showShadiestPath);
 document.getElementById('toggle-heatmap').addEventListener('click', () => {
   heatmapOn = !heatmapOn;
   const btn = document.getElementById('toggle-heatmap');
