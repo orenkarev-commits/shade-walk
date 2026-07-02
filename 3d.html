@@ -134,6 +134,42 @@ const CROSSINGS = [
   { name: 'Herzl',            lat: 32.062962, lon: 34.770005 },
 ];
 
+/* Tree parameters — mirror of the 2D app so blocks render the same way. */
+const DENSITY_FACTOR = { none: 0, sparse: 0.32, medium: 0.55, dense: 0.85 };
+const TREE_SPACING_M = { none: Infinity, sparse: 20, medium: 12, dense: 8 };
+const BLOCK_DEFAULTS = { density: 'dense', h: 16, canopy: 12 };
+const BLOCK_PRESETS = {
+  'Habima Square→Hashmonaim': { density: 'medium', h: 16, canopy: 4 },  // trimmed narrow
+  'Nahalat Binyamin→Herzl':   { density: 'sparse', h: 12, canopy: 8 },  // sparse Section B
+};
+
+/* Shared localStorage keys with the 2D app — edits carry over. */
+const KEY_BLD  = 'shade-walk:v2:buildings';
+const KEY_TREE = 'shade-walk:v2:trees';
+const lsLoad = k => { try { return JSON.parse(localStorage.getItem(k) || '{}'); } catch { return {}; } };
+const buildingOverrides = lsLoad(KEY_BLD);
+const treeOverrides     = lsLoad(KEY_TREE);
+
+/* Resolved per-block config (preset < user override wins). */
+function getTreeBlocks() {
+  const out = [];
+  for (let i = 0; i < CROSSINGS.length - 1; i++) {
+    const a = CROSSINGS[i], b = CROSSINGS[i+1];
+    const key = `${a.name}→${b.name}`;
+    const preset = BLOCK_PRESETS[key] || {};
+    const dflt = { ...BLOCK_DEFAULTS, ...preset };
+    const ovr = treeOverrides[key] || {};
+    out.push({
+      key, label: `${a.name} → ${b.name}`,
+      density: ovr.density || dflt.density,
+      h:       ovr.h       != null ? ovr.h      : dflt.h,
+      canopy:  ovr.canopy  != null ? ovr.canopy : dflt.canopy,
+      a, b,
+    });
+  }
+  return out;
+}
+
 /* Lat/lon → local metres from centre. North = -Z, East = +X. */
 function toWorld(lat, lon) {
   return {
@@ -305,8 +341,13 @@ async function loadBuildings() {
     const street = tags['addr:street'] || '';
     const num = tags['addr:housenumber'];
     const isRothschild = street.includes('רוטשילד') || street.toLowerCase().includes('rothschild');
+    const id = `osm-${e.id}`;
+    // Precedence: user override > address preset > OSM tag > default 16 m.
     let h;
-    if (isRothschild && num && ROTHSCHILD_HEIGHTS[num] != null) {
+    const ovr = buildingOverrides[id];
+    if (ovr && ovr.h != null) {
+      h = ovr.h;
+    } else if (isRothschild && num && ROTHSCHILD_HEIGHTS[num] != null) {
       h = ROTHSCHILD_HEIGHTS[num];
     } else if (tags.height) {
       h = parseFloat(tags.height);
@@ -321,47 +362,87 @@ async function loadBuildings() {
   }
   const total = elements.length;
   document.getElementById('status-text').innerHTML =
-    `<b>${total}</b> buildings · <b>${towerCount}</b> towers > 50 m`;
+    `<b>${total}</b> buildings · <b>${towerCount}</b> towers > 50 m<br>` +
+    `<b>${treeStats.trees}</b> trees across <b>${treeStats.blocks - treeStats.blocksWithoutTrees}</b> blocks` +
+    (treeStats.blocksWithoutTrees ? ` (${treeStats.blocksWithoutTrees} treeless)` : '');
   document.getElementById('dot').style.background = '#16a34a';
 }
 
 /* ═══════════════════════════════════════════════════════════
-   Tree canopies along the boulevard (as green spheres)
+   Trees — two rows per block using resolved density / height /
+   canopy from BLOCK_PRESETS + treeOverrides. Blocks with
+   density 'none' render nothing.
    ═══════════════════════════════════════════════════════════ */
-const treeMaterial = new THREE.MeshLambertMaterial({ color: 0x16a34a });
+const ROW_OFFSET = 8;
+const TRUNK_RATIO = 0.28;                             // trunk height ≈ 28 % of total
+const canopyGeoCache = new Map();                     // reuse geometries by canopy diameter
+const trunkGeoCache  = new Map();                     // reuse trunk geometries by height
+const trunkMaterial  = new THREE.MeshLambertMaterial({ color: 0x6b4a2b });
+const canopyMaterialByDensity = {
+  sparse: new THREE.MeshLambertMaterial({ color: 0x86ac57 }), // paler = fewer leaves
+  medium: new THREE.MeshLambertMaterial({ color: 0x4b9c34 }),
+  dense:  new THREE.MeshLambertMaterial({ color: 0x1f7a2a }), // deep green = full
+};
+
+function canopyGeo(d) {
+  const key = Math.round(d * 10) / 10;
+  if (!canopyGeoCache.has(key)) {
+    canopyGeoCache.set(key, new THREE.SphereGeometry(key / 2, 12, 10));
+  }
+  return canopyGeoCache.get(key);
+}
+function trunkGeo(h) {
+  const key = Math.round(h * 10) / 10;
+  if (!trunkGeoCache.has(key)) {
+    trunkGeoCache.set(key, new THREE.CylinderGeometry(0.35, 0.4, key, 6));
+  }
+  return trunkGeoCache.get(key);
+}
+
+let treeStats = { trees: 0, blocks: 0, blocksWithoutTrees: 0 };
+
 function seedTrees() {
-  const ROW_OFFSET = 8, SPACING = 12, HEIGHT = 16, CANOPY = 10, TRUNK = 4;
-  for (let i = 0; i < CROSSINGS.length - 1; i++) {
-    const a = CROSSINGS[i], b = CROSSINGS[i + 1];
-    const wa = toWorld(a.lat, a.lon), wb = toWorld(b.lat, b.lon);
+  const blocks = getTreeBlocks();
+  for (const blk of blocks) {
+    treeStats.blocks++;
+    if (blk.density === 'none') { treeStats.blocksWithoutTrees++; continue; }
+    const spacing = TREE_SPACING_M[blk.density];
+    if (!isFinite(spacing)) continue;
+
+    const wa = toWorld(blk.a.lat, blk.a.lon);
+    const wb = toWorld(blk.b.lat, blk.b.lon);
     const dx = wb.x - wa.x, dz = wb.z - wa.z;
     const segLen = Math.hypot(dx, dz);
-    const bearing = Math.atan2(dx, dz); // heading angle in XZ
+    const bearing = Math.atan2(dx, dz);          // heading in XZ
     const perp = bearing + Math.PI / 2;
     const px = Math.cos(perp), pz = -Math.sin(perp);
-    const n = Math.max(1, Math.floor(segLen / SPACING));
+
+    const n = Math.max(1, Math.floor(segLen / spacing));
+    const canopyD = blk.canopy;                  // metres
+    const totalH  = blk.h;                       // metres, tree top height
+    const trunkH  = totalH * TRUNK_RATIO;
+    const canopyBottomY = trunkH;
+    const canopyCentreY = canopyBottomY + canopyD / 2;
+    const mat = canopyMaterialByDensity[blk.density] || canopyMaterialByDensity.medium;
+
     for (let k = 0; k < n; k++) {
       const t = (k + 0.5) / n;
       const cx = wa.x + dx * t, cz = wa.z + dz * t;
       for (const side of [+ROW_OFFSET, -ROW_OFFSET]) {
         const x = cx + px * side, z = cz + pz * side;
-        // Trunk
-        const trunk = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.35, 0.4, TRUNK, 6),
-          new THREE.MeshLambertMaterial({ color: 0x6b4a2b })
-        );
-        trunk.position.set(x, TRUNK / 2, z);
+
+        const trunk = new THREE.Mesh(trunkGeo(trunkH), trunkMaterial);
+        trunk.position.set(x, trunkH / 2, z);
         trunk.castShadow = true;
         scene.add(trunk);
-        // Canopy (sphere)
-        const canopy = new THREE.Mesh(
-          new THREE.SphereGeometry(CANOPY / 2, 10, 8),
-          treeMaterial
-        );
-        canopy.position.set(x, TRUNK + CANOPY / 2, z);
+
+        const canopy = new THREE.Mesh(canopyGeo(canopyD), mat);
+        canopy.position.set(x, canopyCentreY, z);
         canopy.castShadow = true;
         canopy.receiveShadow = true;
         scene.add(canopy);
+
+        treeStats.trees++;
       }
     }
   }
