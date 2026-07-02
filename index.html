@@ -411,7 +411,12 @@ function getSun(date, localHour) {
   const cosZ = (Math.sin(decl) - Math.sin(lat)*sinA) / (Math.cos(lat)*Math.cos(altR));
   let az = Math.acos(Math.max(-1, Math.min(1, cosZ))) * 180 / Math.PI;
   if (ha > 0) az = 360 - az;
-  return { alt: altD, az, len: altD > 1 ? 1/Math.tan(altR) : 30, up: altD > 0, offsetH };
+  // Shadow-length multiplier: 1/tan(altitude), capped at 8 so that
+  // low-sun shadows don't stretch beyond the map. Below 1° treat as
+  // "no meaningful shadow" (up=false) — sun this low is atmospheric
+  // scatter, not a directional light source.
+  const rawLen = altD > 0.5 ? 1 / Math.tan(altR) : 8;
+  return { alt: altD, az, len: Math.min(8, rawLen), up: altD > 1, offsetH };
 }
 
 /* ───── Geometry ───── */
@@ -783,12 +788,18 @@ function updateShadows() {
   const dLat = -Math.cos(az) * sun.len / MPD;
   const dLon =  Math.sin(az) * sun.len / (MPD * latC);
 
+  // Fade shadows as the sun gets low — real low-sun shadows are
+  // diffuse/soft, so we lower their alpha proportionally.
+  //   altitude ≥ 25°  → full opacity
+  //   altitude ≤ 5°   → 40 %
+  const altFade = Math.max(0.4, Math.min(1, (sun.alt - 5) / 20));
+
   buildings.forEach(b => {
     const h = resolveBuildingHeight(b).h;
     const env = castShadow(b.poly, h, dLat, dLon);
     L.polygon(env, {
       fillColor: '#0b0f19',
-      fillOpacity: Math.min(0.55, 0.25 + (h/55)*0.30),
+      fillOpacity: altFade * Math.min(0.55, 0.25 + (h/55)*0.30),
       color: 'transparent', interactive: false
     }).addTo(shadowLyr);
   });
@@ -804,7 +815,7 @@ function updateShadows() {
       const env = castShadow(canopyPoly, blk.h, dLat, dLon);
       L.polygon(env, {
         fillColor: '#14532d',
-        fillOpacity: 0.18 + 0.30 * dens,
+        fillOpacity: altFade * (0.18 + 0.30 * dens),
         color: 'transparent', interactive: false
       }).addTo(shadowLyr);
     });
