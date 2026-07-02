@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Shade Walk · 3D preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100%; background: #dae8f0;
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #000; font-size: 14px; line-height: 21.98px;
+    overflow: hidden;
+  }
+  canvas { display: block; }
+  #ui {
+    position: fixed; top: 16px; left: 16px; z-index: 10;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+    min-width: 260px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    font-size: 12px;
+  }
+  #ui h3 { font-size: 13px; font-weight: 600; }
+  #ui .row { display: flex; align-items: center; gap: 10px; }
+  #ui input[type=range] {
+    -webkit-appearance: none; flex: 1; height: 2px;
+    background: rgba(0,0,0,0.15); border-radius: 2px; outline: none;
+  }
+  #ui input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px;
+    border-radius: 50%; background: #111; cursor: pointer;
+  }
+  #ui input[type=date] {
+    border: 1px solid rgba(0,0,0,0.1); border-radius: 99px;
+    padding: 4px 10px; font-size: 11px; font-family: inherit;
+    background: #fff;
+  }
+  #ui .val { font-weight: 600; min-width: 76px; text-align: right; }
+  #back {
+    display: inline-block; margin-top: 4px;
+    font-size: 11px; color: #2563eb; text-decoration: none;
+  }
+  #back:hover { text-decoration: underline; }
+  #status {
+    position: fixed; bottom: 16px; left: 16px; z-index: 10;
+    background: rgba(255,255,255,0.96);
+    border: 1px solid rgba(0,0,0,0.08);
+    border-radius: 10px; padding: 8px 12px; font-size: 11px;
+    max-width: 280px;
+  }
+  #status .dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    vertical-align: middle; margin-right: 6px; background: #9ca3af;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="ui">
+  <h3>🌆 Shade Walk · 3D</h3>
+  <div class="row">
+    <span style="opacity:0.6">Date</span>
+    <input type="date" id="date">
+  </div>
+  <div class="row">
+    <span style="opacity:0.6">Time</span>
+    <input type="range" id="time" min="5" max="20" step="0.083" value="10">
+    <span class="val" id="time-out">10:00 am</span>
+  </div>
+  <div class="row" style="font-size:10px; opacity:0.6">
+    Drag = orbit · Right-drag = pan · Scroll = zoom
+  </div>
+  <a id="back" href="index.html">← 2D map</a>
+</div>
+
+<div id="status">
+  <span class="dot" id="dot"></span><span id="status-text">Loading buildings…</span>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/* ═══════════════════════════════════════════════════════════
+   Constants + address heights (kept in sync with 2D app)
+   ═══════════════════════════════════════════════════════════ */
+const TLV_LAT = 32.065, TLV_LON = 34.775;   // Rothschild centre
+const MPD = 111320;
+const latC = Math.cos(TLV_LAT * Math.PI / 180);
+const FLOOR_M = 4;
+
+// Real Rothschild address heights (user-provided)
+const ROTHSCHILD_HEIGHTS = {
+  '1': 120.2, '22': 126.9, '30': 102, '36': 158, '42': 132, '56': 126.9,
+  '2': 12, '4': 12, '6': 12, '8': 13, '10': 13, '12': 13, '14': 13, '16': 13,
+  '18': 16, '20': 16, '24': 18, '26': 18, '28': 18, '32': 22, '34': 22,
+  '38': 18, '40': 18, '44': 18, '46': 20, '48': 18, '50': 18, '52': 18, '54': 20,
+  '58': 18, '60': 18, '62': 18, '64': 18, '66': 18, '68': 18, '70': 18, '72': 18,
+  '74': 18, '76': 18, '78': 18, '80': 18, '82': 18, '84': 18, '86': 18, '88': 18,
+  '90': 18, '92': 18, '94': 18, '96': 18, '98': 18, '100': 18, '102': 18, '104': 18,
+  '106': 18, '108': 18, '110': 18, '112': 18, '114': 18, '116': 18, '118': 18,
+  '120': 18, '122': 18, '124': 18, '126': 18, '128': 18, '130': 18, '132': 18,
+  '134': 18, '136': 18, '138': 18,
+};
+
+// Rothschild crossings (user ground-truthed)
+const CROSSINGS = [
+  { name: 'Habima Square',    lat: 32.072005, lon: 34.779269 },
+  { name: 'Hashmonaim',       lat: 32.070462, lon: 34.778764 },
+  { name: 'Bar Ilan',         lat: 32.069575, lon: 34.778488 },
+  { name: 'Sheinkin',         lat: 32.068122, lon: 34.778053 },
+  { name: 'Balfour',          lat: 32.066594, lon: 34.777564 },
+  { name: 'Mazeh',            lat: 32.065918, lon: 34.777274 },
+  { name: 'Nahmani',          lat: 32.065360, lon: 34.776731 },
+  { name: 'Betzalel Yaffe',   lat: 32.064307, lon: 34.775531 },
+  { name: 'Yavne',            lat: 32.063745, lon: 34.773747 },
+  { name: 'Allenby',          lat: 32.063511, lon: 34.772919 },
+  { name: 'Nahalat Binyamin', lat: 32.063169, lon: 34.771650 },
+  { name: 'Herzl',            lat: 32.062962, lon: 34.770005 },
+];
+
+/* Lat/lon → local metres from centre. North = -Z, East = +X. */
+function toWorld(lat, lon) {
+  return {
+    x: (lon - TLV_LON) * MPD * latC,
+    z: -(lat - TLV_LAT) * MPD,
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Sun math — same NOAA-style routine as the 2D app
+   ═══════════════════════════════════════════════════════════ */
+function tlvOffsetHours(date) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Jerusalem', timeZoneName: 'longOffset',
+      year: 'numeric', month: 'numeric', day: 'numeric'
+    });
+    const tz = fmt.formatToParts(date).find(p => p.type === 'timeZoneName')?.value || 'GMT+02:00';
+    const m = tz.match(/GMT([+-])(\d{1,2}):?(\d{2})?/);
+    if (!m) return 2;
+    return (m[1] === '+' ? 1 : -1) * (parseInt(m[2]) + parseInt(m[3] || 0) / 60);
+  } catch { return 2; }
+}
+function getSun(date, localHour) {
+  const start = new Date(date.getFullYear(), 0, 0);
+  const doy = Math.floor((date - start) / 86400000);
+  const declDeg = 23.45 * Math.sin(2 * Math.PI * (284 + doy) / 365);
+  const decl = declDeg * Math.PI / 180;
+  const B = 2 * Math.PI * (doy - 81) / 365;
+  const eot = 9.87 * Math.sin(2*B) - 7.53 * Math.cos(B) - 1.5 * Math.sin(B);
+  const offsetH = tlvOffsetHours(date);
+  const stdMeridian = 15 * offsetH;
+  const solarHour = localHour + (4 * (34.78 - stdMeridian) + eot) / 60;
+  const ha = (solarHour - 12) * 15 * Math.PI / 180;
+  const lat = 32.07 * Math.PI / 180;
+  const sinA = Math.sin(lat)*Math.sin(decl) + Math.cos(lat)*Math.cos(decl)*Math.cos(ha);
+  const altR = Math.asin(Math.max(-1, Math.min(1, sinA)));
+  const altD = altR * 180 / Math.PI;
+  const cosZ = (Math.sin(decl) - Math.sin(lat)*sinA) / (Math.cos(lat)*Math.cos(altR));
+  let az = Math.acos(Math.max(-1, Math.min(1, cosZ))) * 180 / Math.PI;
+  if (ha > 0) az = 360 - az;
+  return { alt: altD, az, up: altD > 1 };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Three.js scene setup
+   ═══════════════════════════════════════════════════════════ */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdae8f0);
+scene.fog = new THREE.Fog(0xdae8f0, 800, 2500);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 5000);
+camera.position.set(400, 400, 400);
+camera.lookAt(0, 0, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2 - 0.05;
+controls.target.set(0, 0, 0);
+
+// Ambient + hemisphere fill so shadows aren't inky black
+scene.add(new THREE.HemisphereLight(0xdaeaf5, 0x555555, 0.5));
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+/* Sun — directional light with shadow map */
+const sun = new THREE.DirectionalLight(0xfff8e0, 1.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 4000;
+const shadowBox = 1200;
+sun.shadow.camera.left = -shadowBox;
+sun.shadow.camera.right = shadowBox;
+sun.shadow.camera.top = shadowBox;
+sun.shadow.camera.bottom = -shadowBox;
+sun.shadow.bias = -0.0005;
+sun.shadow.normalBias = 0.05;
+scene.add(sun);
+scene.add(sun.target);
+
+function updateSunLight(azDeg, altDeg) {
+  const az = azDeg * Math.PI / 180;
+  const alt = Math.max(0.5, altDeg) * Math.PI / 180;
+  const dist = 1800;
+  // Azimuth: 0° = North, 90° = East, clockwise.
+  // World: north = -Z, east = +X.
+  sun.position.set(
+    Math.sin(az) * Math.cos(alt) * dist,
+    Math.sin(alt) * dist,
+    -Math.cos(az) * Math.cos(alt) * dist
+  );
+  sun.target.updateMatrixWorld();
+  const intensity = Math.max(0.2, Math.min(1.6, altDeg / 30 + 0.3));
+  sun.intensity = intensity;
+}
+
+/* Ground */
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(4000, 4000),
+  new THREE.MeshLambertMaterial({ color: 0xece7dc })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* Simple road strip along the boulevard so orientation is legible */
+{
+  const points = CROSSINGS.map(c => {
+    const p = toWorld(c.lat, c.lon);
+    return new THREE.Vector3(p.x, 0.05, p.z);
+  });
+  const geom = new THREE.BufferGeometry().setFromPoints(points);
+  const line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x666666 }));
+  scene.add(line);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Build a building mesh from an OSM footprint polygon
+   ═══════════════════════════════════════════════════════════ */
+const buildingMaterial = new THREE.MeshLambertMaterial({ color: 0xd6d3d1 });
+const towerMaterial   = new THREE.MeshLambertMaterial({ color: 0xa8a29e });
+
+function makeBuilding(polyLatLon, height) {
+  if (!polyLatLon || polyLatLon.length < 3 || !height) return null;
+  const shape = new THREE.Shape();
+  polyLatLon.forEach((p, i) => {
+    const w = toWorld(p.lat, p.lon);
+    if (i === 0) shape.moveTo(w.x, -w.z);
+    else shape.lineTo(w.x, -w.z);
+  });
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false });
+  geo.rotateX(-Math.PI / 2);
+  const mat = height > 50 ? towerMaterial : buildingMaterial;
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Load OSM buildings (same query as the 2D app)
+   ═══════════════════════════════════════════════════════════ */
+async function loadBuildings() {
+  const q = `[out:json][timeout:25];(way["building"](32.053,34.765,32.075,34.781););out geom;`;
+  const r = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'data=' + encodeURIComponent(q),
+    signal: AbortSignal.timeout(30000),
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const data = await r.json();
+  const elements = (data.elements || []).filter(
+    e => e.type === 'way' && e.geometry?.length >= 3
+  );
+
+  let towerCount = 0;
+  for (const e of elements) {
+    const tags = e.tags || {};
+    const street = tags['addr:street'] || '';
+    const num = tags['addr:housenumber'];
+    const isRothschild = street.includes('רוטשילד') || street.toLowerCase().includes('rothschild');
+    let h;
+    if (isRothschild && num && ROTHSCHILD_HEIGHTS[num] != null) {
+      h = ROTHSCHILD_HEIGHTS[num];
+    } else if (tags.height) {
+      h = parseFloat(tags.height);
+    } else if (tags['building:levels']) {
+      h = parseFloat(tags['building:levels']) * 3.2;
+    } else {
+      h = 16;
+    }
+    if (h > 50) towerCount++;
+    const mesh = makeBuilding(e.geometry, h);
+    if (mesh) scene.add(mesh);
+  }
+  const total = elements.length;
+  document.getElementById('status-text').innerHTML =
+    `<b>${total}</b> buildings · <b>${towerCount}</b> towers > 50 m`;
+  document.getElementById('dot').style.background = '#16a34a';
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Tree canopies along the boulevard (as green spheres)
+   ═══════════════════════════════════════════════════════════ */
+const treeMaterial = new THREE.MeshLambertMaterial({ color: 0x16a34a });
+function seedTrees() {
+  const ROW_OFFSET = 8, SPACING = 12, HEIGHT = 16, CANOPY = 10, TRUNK = 4;
+  for (let i = 0; i < CROSSINGS.length - 1; i++) {
+    const a = CROSSINGS[i], b = CROSSINGS[i + 1];
+    const wa = toWorld(a.lat, a.lon), wb = toWorld(b.lat, b.lon);
+    const dx = wb.x - wa.x, dz = wb.z - wa.z;
+    const segLen = Math.hypot(dx, dz);
+    const bearing = Math.atan2(dx, dz); // heading angle in XZ
+    const perp = bearing + Math.PI / 2;
+    const px = Math.cos(perp), pz = -Math.sin(perp);
+    const n = Math.max(1, Math.floor(segLen / SPACING));
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n;
+      const cx = wa.x + dx * t, cz = wa.z + dz * t;
+      for (const side of [+ROW_OFFSET, -ROW_OFFSET]) {
+        const x = cx + px * side, z = cz + pz * side;
+        // Trunk
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.35, 0.4, TRUNK, 6),
+          new THREE.MeshLambertMaterial({ color: 0x6b4a2b })
+        );
+        trunk.position.set(x, TRUNK / 2, z);
+        trunk.castShadow = true;
+        scene.add(trunk);
+        // Canopy (sphere)
+        const canopy = new THREE.Mesh(
+          new THREE.SphereGeometry(CANOPY / 2, 10, 8),
+          treeMaterial
+        );
+        canopy.position.set(x, TRUNK + CANOPY / 2, z);
+        canopy.castShadow = true;
+        canopy.receiveShadow = true;
+        scene.add(canopy);
+      }
+    }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   UI handlers
+   ═══════════════════════════════════════════════════════════ */
+let currentDate = new Date();
+const dateInput = document.getElementById('date');
+const timeInput = document.getElementById('time');
+const timeOut = document.getElementById('time-out');
+
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function fmtTime(h) {
+  const hh = Math.floor(h);
+  const mm = Math.round((h - hh) * 60).toString().padStart(2, '0');
+  const ap = hh < 12 ? 'am' : 'pm';
+  const d = hh > 12 ? hh - 12 : (hh === 0 ? 12 : hh);
+  return `${d}:${mm} ${ap}`;
+}
+dateInput.value = isoDate(currentDate);
+timeOut.textContent = fmtTime(parseFloat(timeInput.value));
+
+function refreshSun() {
+  const hour = parseFloat(timeInput.value);
+  timeOut.textContent = fmtTime(hour);
+  const s = getSun(currentDate, hour);
+  if (s.up) {
+    updateSunLight(s.az, s.alt);
+    scene.fog.color.setHex(0xdae8f0);
+    renderer.setClearColor(0xdae8f0);
+  } else {
+    updateSunLight(0, 5);
+    scene.fog.color.setHex(0x0f172a);
+    renderer.setClearColor(0x0f172a);
+  }
+}
+
+timeInput.addEventListener('input', refreshSun);
+dateInput.addEventListener('change', () => {
+  if (!dateInput.value) return;
+  const [y, m, d] = dateInput.value.split('-').map(Number);
+  currentDate = new Date(y, m - 1, d);
+  refreshSun();
+});
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ═══════════════════════════════════════════════════════════
+   Boot
+   ═══════════════════════════════════════════════════════════ */
+seedTrees();
+refreshSun();
+
+(async () => {
+  try {
+    await loadBuildings();
+  } catch (err) {
+    console.error(err);
+    document.getElementById('status-text').textContent = 'Failed to load buildings — check network.';
+    document.getElementById('dot').style.background = '#dc2626';
+  }
+})();
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+
+</body>
+</html>
