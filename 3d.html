@@ -63,10 +63,20 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    "three": "https://esm.sh/three@0.160.0",
+    "three/addons/": "https://esm.sh/three@0.160.0/examples/jsm/"
   }
 }
+</script>
+<script>
+  // Fail-fast diagnostics — surface anything before the module runs.
+  window.addEventListener('error', e => {
+    const s = document.getElementById('status-text');
+    if (s) s.textContent = 'Load error: ' + (e.message || e.error);
+    const d = document.getElementById('dot');
+    if (d) d.style.background = '#dc2626';
+    console.error('[shade-walk 3d]', e);
+  });
 </script>
 </head>
 <body>
@@ -361,11 +371,12 @@ async function loadBuildings() {
     if (mesh) scene.add(mesh);
   }
   const total = elements.length;
-  document.getElementById('status-text').innerHTML =
+  setStatus(
     `<b>${total}</b> buildings · <b>${towerCount}</b> towers > 50 m<br>` +
     `<b>${treeStats.trees}</b> trees across <b>${treeStats.blocks - treeStats.blocksWithoutTrees}</b> blocks` +
-    (treeStats.blocksWithoutTrees ? ` (${treeStats.blocksWithoutTrees} treeless)` : '');
-  document.getElementById('dot').style.background = '#16a34a';
+    (treeStats.blocksWithoutTrees ? ` (${treeStats.blocksWithoutTrees} treeless)` : ''),
+    true
+  );
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -499,22 +510,22 @@ window.addEventListener('resize', () => {
 });
 
 /* ═══════════════════════════════════════════════════════════
-   Boot — surface any failure to the status card so we're not
-   guessing at silent errors.
+   Boot — every step reports to the status card
    ═══════════════════════════════════════════════════════════ */
-window.addEventListener('error', e => {
-  const s = document.getElementById('status-text');
-  if (s) s.textContent = 'JS error: ' + e.message;
-  const d = document.getElementById('dot');
-  if (d) d.style.background = '#dc2626';
-});
+const setStatus = (html, ok) => {
+  document.getElementById('status-text').innerHTML = html;
+  document.getElementById('dot').style.background =
+    ok === true ? '#16a34a' : ok === false ? '#dc2626' : '#9ca3af';
+};
 
+setStatus('Three.js loaded ✓ · seeding trees…');
 try {
   seedTrees();
   console.log('Trees seeded:', treeStats);
+  setStatus(`<b>${treeStats.trees}</b> trees seeded across <b>${treeStats.blocks - treeStats.blocksWithoutTrees}</b> blocks · fetching buildings…`);
 } catch (err) {
   console.error('seedTrees failed:', err);
-  document.getElementById('status-text').textContent = 'Trees failed: ' + err.message;
+  setStatus('Trees failed: ' + err.message, false);
 }
 refreshSun();
 
@@ -523,8 +534,7 @@ refreshSun();
     await loadBuildings();
   } catch (err) {
     console.error(err);
-    document.getElementById('status-text').textContent = 'Failed to load buildings — ' + err.message;
-    document.getElementById('dot').style.background = '#dc2626';
+    setStatus('Failed to load buildings — ' + err.message, false);
   }
 })();
 
