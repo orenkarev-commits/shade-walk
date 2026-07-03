@@ -63,8 +63,8 @@
 <script type="importmap">
 {
   "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
   }
 }
 </script>
@@ -246,7 +246,7 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 /* Sun — directional light with shadow map */
 const sun = new THREE.DirectionalLight(0xfff8e0, 1.4);
 sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
+sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 10;
 sun.shadow.camera.far = 4000;
 const shadowBox = 1200;
@@ -413,9 +413,9 @@ function seedTrees() {
     const wb = toWorld(blk.b.lat, blk.b.lon);
     const dx = wb.x - wa.x, dz = wb.z - wa.z;
     const segLen = Math.hypot(dx, dz);
-    const bearing = Math.atan2(dx, dz);          // heading in XZ
-    const perp = bearing + Math.PI / 2;
-    const px = Math.cos(perp), pz = -Math.sin(perp);
+    if (segLen < 1) continue;
+    // Unit perpendicular (rotate 90° CCW in the XZ plane).
+    const px = -dz / segLen, pz = dx / segLen;
 
     const n = Math.max(1, Math.floor(segLen / spacing));
     const canopyD = blk.canopy;                  // metres
@@ -499,9 +499,23 @@ window.addEventListener('resize', () => {
 });
 
 /* ═══════════════════════════════════════════════════════════
-   Boot
+   Boot — surface any failure to the status card so we're not
+   guessing at silent errors.
    ═══════════════════════════════════════════════════════════ */
-seedTrees();
+window.addEventListener('error', e => {
+  const s = document.getElementById('status-text');
+  if (s) s.textContent = 'JS error: ' + e.message;
+  const d = document.getElementById('dot');
+  if (d) d.style.background = '#dc2626';
+});
+
+try {
+  seedTrees();
+  console.log('Trees seeded:', treeStats);
+} catch (err) {
+  console.error('seedTrees failed:', err);
+  document.getElementById('status-text').textContent = 'Trees failed: ' + err.message;
+}
 refreshSun();
 
 (async () => {
@@ -509,7 +523,7 @@ refreshSun();
     await loadBuildings();
   } catch (err) {
     console.error(err);
-    document.getElementById('status-text').textContent = 'Failed to load buildings — check network.';
+    document.getElementById('status-text').textContent = 'Failed to load buildings — ' + err.message;
     document.getElementById('dot').style.background = '#dc2626';
   }
 })();
