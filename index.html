@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Shade Walk · Rothschild</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -202,6 +202,62 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important;
   }
   .leaflet-tooltip::before { display: none !important; }
+
+  /* ─── MOBILE ─── */
+  @media (max-width: 720px) {
+    #topbar {
+      top: 8px; left: 8px; right: 8px; transform: none;
+      padding: 8px 10px;
+      gap: 8px;
+      flex-wrap: wrap;
+      border-radius: 14px;
+      max-width: none;
+    }
+    #topbar .brand { font-size: 11px; width: 100%; }
+    #topbar input[type=range] { width: auto; flex: 1; min-width: 100px; }
+    #time-display { min-width: 60px; font-size: 11px; }
+    #topbar input[type=date] { font-size: 10px; padding: 4px 8px; }
+    .btn { padding: 6px 10px; font-size: 10px; }
+
+    #rail {
+      right: 8px; bottom: 8px; top: auto; transform: none;
+      flex-direction: row; gap: 6px;
+    }
+    .rail-btn {
+      width: 40px; height: 40px; border-radius: 10px;
+      font-size: 17px;
+    }
+
+    #status {
+      left: 8px; right: auto; bottom: 8px; max-width: calc(60% - 16px);
+      padding: 8px 10px; font-size: 10px; border-radius: 10px;
+    }
+
+    #bld-panel, #tree-panel {
+      top: 76px; left: 8px; right: 8px; width: auto; max-width: none;
+      transform: none;
+    }
+    #tree-panel { top: 76px; bottom: 76px; right: 60px; }
+
+    .panel { border-radius: 12px; }
+    .ep-body, #tree-panel .body { padding: 10px 12px; }
+    .panel h3 { font-size: 12px; }
+    .panel label { font-size: 9px; }
+
+    .tree-card { padding: 10px; margin-bottom: 8px; }
+    .tree-card h4 { font-size: 11px; }
+    .density-row button { padding: 10px 4px; font-size: 10px; }
+
+    .overlay .text { font-size: 12px; }
+  }
+
+  /* ─── LARGE TAP TARGETS ─── */
+  @media (pointer: coarse) {
+    #topbar input[type=range]::-webkit-slider-thumb { width: 22px; height: 22px; }
+    .panel input[type=range]::-webkit-slider-thumb { width: 22px; height: 22px; }
+    .tb-density button, .density-row button { min-height: 36px; }
+    .rail-btn { min-height: 44px; min-width: 44px; }
+  }
 </style>
 </head>
 <body>
