@@ -849,7 +849,7 @@ function updateShadows() {
   const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI / 180);
   const az = sun.az * Math.PI / 180;
   const dLat = -Math.cos(az) * sun.len / MPD;
-  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+  const dLon = -Math.sin(az) * sun.len / (MPD * latC);
 
   // Fade shadows as the sun gets low — real low-sun shadows are
   // diffuse/soft, so we lower their alpha proportionally.
@@ -945,7 +945,7 @@ function computePathShade(path, sun) {
   const MPD = 111320, latC = Math.cos(TLV_LAT * Math.PI / 180);
   const az = sun.az * Math.PI / 180;
   const dLat = -Math.cos(az) * sun.len / MPD;
-  const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+  const dLon = -Math.sin(az) * sun.len / (MPD * latC);
 
   const buildingShadows = buildings.map(b => {
     const h = resolveBuildingHeight(b).h;
@@ -1042,7 +1042,7 @@ async function runHeatmap() {
       if (!sun.up || sun.alt < 3) continue;
       const az = sun.az * Math.PI / 180;
       const dLat = -Math.cos(az) * sun.len / MPD;
-      const dLon =  Math.sin(az) * sun.len / (MPD * latC);
+      const dLon = -Math.sin(az) * sun.len / (MPD * latC);
 
       for (const b of bldgs) {
         const env = castShadow(b.poly, b.h, dLat, dLon);
