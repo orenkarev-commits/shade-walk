@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>Shade Walk · 3D preview</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -59,6 +59,25 @@
     display: inline-block; width: 8px; height: 8px; border-radius: 50%;
     vertical-align: middle; margin-right: 6px; background: #9ca3af;
   }
+
+  /* ─── MOBILE ─── */
+  @media (max-width: 720px) {
+    #ui {
+      top: 8px; left: 8px; right: 8px;
+      padding: 10px 12px;
+      min-width: 0;
+      border-radius: 12px;
+      gap: 8px;
+    }
+    #ui h3 { font-size: 12px; }
+    #ui .row { gap: 8px; font-size: 10px; }
+    #ui .val { font-size: 11px; min-width: 62px; }
+    #ui input[type=date] { font-size: 10px; padding: 4px 8px; }
+    #status { bottom: 8px; left: 8px; right: 8px; max-width: none; font-size: 10px; }
+  }
+  @media (pointer: coarse) {
+    #ui input[type=range]::-webkit-slider-thumb { width: 20px; height: 20px; }
+  }
 </style>
 <script type="importmap">
 {
@@ -93,7 +112,7 @@
     <span class="val" id="time-out">10:00 am</span>
   </div>
   <div class="row" style="font-size:10px; opacity:0.6">
-    Drag = orbit · Right-drag = pan · Scroll = zoom
+    Drag / 1-finger = orbit · 2-finger = pan / zoom
   </div>
   <a id="back" href="index.html">← 2D map</a>
 </div>
@@ -247,7 +266,13 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI / 2 - 0.05;
+controls.minDistance = 30;
+controls.maxDistance = 2500;
 controls.target.set(0, 0, 0);
+// Explicit mobile touch gestures: one finger = orbit, two fingers = pan.
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+// Stop the renderer canvas from triggering pinch-zoom on the page itself.
+renderer.domElement.style.touchAction = 'none';
 
 // Ambient + hemisphere fill so shadows aren't inky black
 scene.add(new THREE.HemisphereLight(0xdaeaf5, 0x555555, 0.5));
