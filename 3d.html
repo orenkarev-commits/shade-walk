@@ -114,7 +114,13 @@
   <div class="row" style="font-size:10px; opacity:0.6">
     Drag / 1-finger = orbit · 2-finger = pan / zoom
   </div>
-  <a id="back" href="index.html">← 2D map</a>
+  <div style="display:flex; justify-content:space-between; margin-top:4px; font-size:11px;">
+    <span>
+      <a href="#" id="export-edits" style="color:#2563eb; text-decoration:none;">⬇ Export</a>
+      <a href="#" id="import-edits" style="color:#2563eb; text-decoration:none; margin-left:8px;">⬆ Import</a>
+    </span>
+    <a id="back" href="index.html" style="color:#2563eb; text-decoration:none;">← 2D map</a>
+  </div>
 </div>
 
 <div id="status">
@@ -318,6 +324,70 @@ const ground = new THREE.Mesh(
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
+
+/* ═══════════════════════════════════════════════════════════
+   Basemap — Carto Voyager tiles stitched into a single texture
+   and applied to the ground plane. Same tile set as the 2D map.
+   ═══════════════════════════════════════════════════════════ */
+async function loadBasemap() {
+  const ZOOM = 17;
+  const RADIUS = 5;                             // 11×11 tile grid ≈ 2.85 km wide
+  const TILE_PX = 256;
+  const gridN = RADIUS * 2 + 1;
+  const latR = TLV_LAT * Math.PI / 180;
+  const tileM = 40075016.686 * Math.cos(latR) / (2 ** ZOOM); // metres per tile edge
+
+  // Fractional tile coord of our world origin
+  const n = 2 ** ZOOM;
+  const fx = (TLV_LON + 180) / 360 * n;
+  const fy = (1 - Math.log(Math.tan(latR) + 1 / Math.cos(latR)) / Math.PI) / 2 * n;
+  const ox = Math.floor(fx), oy = Math.floor(fy);
+  const fracX = fx - ox, fracY = fy - oy;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = TILE_PX * gridN;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#eee7dc';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const subdomains = ['a', 'b', 'c', 'd'];
+  const jobs = [];
+  for (let i = 0; i < gridN; i++) {
+    for (let j = 0; j < gridN; j++) {
+      const tx = ox - RADIUS + i, ty = oy - RADIUS + j;
+      const s = subdomains[(i + j) % subdomains.length];
+      const url = `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${ZOOM}/${tx}/${ty}.png`;
+      jobs.push(new Promise(resolve => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload  = () => { ctx.drawImage(img, i * TILE_PX, j * TILE_PX); resolve(); };
+        img.onerror = () => resolve();
+        img.src = url;
+      }));
+    }
+  }
+  await Promise.all(jobs);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+
+  const size = tileM * gridN;
+  ground.geometry.dispose();
+  ground.geometry = new THREE.PlaneGeometry(size, size);
+  ground.material.dispose();
+  ground.material = new THREE.MeshLambertMaterial({ map: texture });
+  ground.receiveShadow = true;
+  // Shift so world origin (TLV_LAT/LON) lines up with its position in the tile grid.
+  ground.position.set(
+    (0.5 - fracX) * tileM,
+    0,
+    (0.5 - fracY) * tileM,
+  );
+  // Re-apply rotation (was cleared by geometry swap on some setups).
+  ground.rotation.x = -Math.PI / 2;
+}
 
 /* Simple road strip along the boulevard so orientation is legible */
 {
@@ -547,21 +617,68 @@ setStatus('Three.js loaded ✓ · seeding trees…');
 try {
   seedTrees();
   console.log('Trees seeded:', treeStats);
-  setStatus(`<b>${treeStats.trees}</b> trees seeded across <b>${treeStats.blocks - treeStats.blocksWithoutTrees}</b> blocks · fetching buildings…`);
+  setStatus(`<b>${treeStats.trees}</b> trees · fetching basemap & buildings…`);
 } catch (err) {
   console.error('seedTrees failed:', err);
   setStatus('Trees failed: ' + err.message, false);
 }
 refreshSun();
 
-(async () => {
-  try {
-    await loadBuildings();
-  } catch (err) {
+/* Basemap + buildings load in parallel */
+Promise.all([
+  loadBasemap().catch(err => console.warn('basemap:', err)),
+  loadBuildings().catch(err => {
     console.error(err);
     setStatus('Failed to load buildings — ' + err.message, false);
-  }
-})();
+  }),
+]);
+
+/* ═══════════════════════════════════════════════════════════
+   Export / Import edits — same JSON format as the 2D app
+   ═══════════════════════════════════════════════════════════ */
+function exportEdits(e) {
+  if (e) e.preventDefault();
+  const bundle = {
+    version: 'shade-walk:v2',
+    exportedAt: new Date().toISOString(),
+    buildings: JSON.parse(localStorage.getItem(KEY_BLD)  || '{}'),
+    trees:     JSON.parse(localStorage.getItem(KEY_TREE) || '{}'),
+  };
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `shade-walk-edits-${new Date().toISOString().slice(0,10)}.json`,
+  });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function importEdits(e) {
+  if (e) e.preventDefault();
+  const input = Object.assign(document.createElement('input'), {
+    type: 'file', accept: 'application/json,.json',
+  });
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (data.buildings && typeof data.buildings === 'object') {
+        localStorage.setItem(KEY_BLD, JSON.stringify(data.buildings));
+      }
+      if (data.trees && typeof data.trees === 'object') {
+        localStorage.setItem(KEY_TREE, JSON.stringify(data.trees));
+      }
+      alert('Imported. Reloading…');
+      location.reload();
+    } catch (err) {
+      alert('Import failed: ' + err.message);
+    }
+  };
+  input.click();
+}
+document.getElementById('export-edits').addEventListener('click', exportEdits);
+document.getElementById('import-edits').addEventListener('click', importEdits);
 
 function animate() {
   requestAnimationFrame(animate);
