@@ -282,8 +282,12 @@
   <div><span class="dot" id="gis-dot"></span><span id="gis-text">Connecting to TLV GIS…</span></div>
   <div id="bld-count" style="opacity:0.6; margin-top:4px;"></div>
   <div id="best-path-out" style="display:none; margin-top:6px; padding-top:6px; border-top:1px solid rgba(0,0,0,0.08); font-weight:600;"></div>
-  <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(0,0,0,0.08); font-size:11px;">
-    <a href="3d.html" style="color:#2563eb; text-decoration:none;">Try 3D preview →</a>
+  <div style="margin-top:6px; padding-top:6px; border-top:1px solid rgba(0,0,0,0.08); font-size:11px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+    <span>
+      <a href="#" id="export-edits" style="color:#2563eb; text-decoration:none;">⬇ Export</a> ·
+      <a href="#" id="import-edits" style="color:#2563eb; text-decoration:none;">⬆ Import</a>
+    </span>
+    <a href="3d.html" style="color:#2563eb; text-decoration:none;">3D →</a>
   </div>
 </div>
 
@@ -1209,6 +1213,51 @@ document.getElementById('date-pick').addEventListener('change', (e) => {
 });
 document.getElementById('run-shade').addEventListener('click', runHeatmap);
 document.getElementById('best-path').addEventListener('click', showShadiestPath);
+
+/* ───── Export / Import edits (shared JSON, cross-device) ───── */
+function exportEdits(e) {
+  if (e) e.preventDefault();
+  const bundle = {
+    version: 'shade-walk:v2',
+    exportedAt: new Date().toISOString(),
+    buildings: JSON.parse(localStorage.getItem(KEY_BLD)  || '{}'),
+    trees:     JSON.parse(localStorage.getItem(KEY_TREE) || '{}'),
+  };
+  const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), {
+    href: url,
+    download: `shade-walk-edits-${new Date().toISOString().slice(0,10)}.json`,
+  });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function importEdits(e) {
+  if (e) e.preventDefault();
+  const input = Object.assign(document.createElement('input'), {
+    type: 'file', accept: 'application/json,.json',
+  });
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    try {
+      const data = JSON.parse(await file.text());
+      if (data.buildings && typeof data.buildings === 'object') {
+        localStorage.setItem(KEY_BLD, JSON.stringify(data.buildings));
+      }
+      if (data.trees && typeof data.trees === 'object') {
+        localStorage.setItem(KEY_TREE, JSON.stringify(data.trees));
+      }
+      alert('Imported. Reloading…');
+      location.reload();
+    } catch (err) {
+      alert('Import failed: ' + err.message);
+    }
+  };
+  input.click();
+}
+document.getElementById('export-edits').addEventListener('click', exportEdits);
+document.getElementById('import-edits').addEventListener('click', importEdits);
 document.getElementById('toggle-heatmap').addEventListener('click', () => {
   heatmapOn = !heatmapOn;
   const btn = document.getElementById('toggle-heatmap');
