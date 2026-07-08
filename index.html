@@ -1010,6 +1010,11 @@ function toggleBestRoute() {
   drawBestRoute();
 }
 
+/* How much shade gain (as a fraction) is required to justify a
+   side-switch at a crossing. 0.10 = "only switch if the shadier
+   side gives at least 10 percentage points more coverage". */
+const SWITCH_PENALTY = 0.10;
+
 function drawBestRoute() {
   if (bestPathLayer) { map.removeLayer(bestPathLayer); bestPathLayer = null; }
   const btn = document.getElementById('best-path');
@@ -1023,8 +1028,8 @@ function drawBestRoute() {
     return;
   }
 
-  // For each block between consecutive crossings, pick the shadiest of the three paths.
-  const route = [];
+  // Step 1: for each block, compute shade coverage for all three paths.
+  const blocks = [];
   for (let i = 0; i < CROSSINGS.length - 1; i++) {
     const a = CROSSINGS[i], b = CROSSINGS[i + 1];
     const aIdx = nearestPolylineIndex(boulevardPolyline, a.lat, a.lon);
@@ -1033,15 +1038,43 @@ function drawBestRoute() {
     const subPoly = boulevardPolyline.slice(lo, hi + 1);
     if (subPoly.length < 2) continue;
 
-    let best = null;
+    const paths = {};
     for (const [key, cfg] of Object.entries(PATH_CONFIG)) {
       const offset = offsetPolyline(subPoly, cfg.offset);
-      const shade = computePathShade(offset, sun);
-      if (!best || shade > best.shade) best = { key, path: offset, shade };
+      paths[key] = { path: offset, shade: computePathShade(offset, sun) };
     }
-    route.push(best);
+    blocks.push(paths);
   }
-  if (!route.length) return;
+  if (!blocks.length) return;
+
+  // Step 2: Viterbi over blocks × 3 paths, penalising side-switches.
+  const KEYS = ['left', 'central', 'right'];
+  const N = blocks.length;
+  const dp = Array.from({ length: N }, () => ({}));
+  const bp = Array.from({ length: N }, () => ({}));  // back-pointers
+  for (const k of KEYS) { dp[0][k] = blocks[0][k].shade; bp[0][k] = null; }
+  for (let i = 1; i < N; i++) {
+    for (const k of KEYS) {
+      let bestScore = -Infinity, bestPrev = null;
+      for (const kp of KEYS) {
+        const cost = kp === k ? 0 : SWITCH_PENALTY;
+        const score = dp[i-1][kp] - cost + blocks[i][k].shade;
+        if (score > bestScore) { bestScore = score; bestPrev = kp; }
+      }
+      dp[i][k] = bestScore;
+      bp[i][k] = bestPrev;
+    }
+  }
+  let last = KEYS[0];
+  for (const k of KEYS) if (dp[N-1][k] > dp[N-1][last]) last = k;
+
+  const seq = new Array(N);
+  seq[N-1] = last;
+  for (let i = N-2; i >= 0; i--) seq[i] = bp[i+1][seq[i+1]];
+
+  const route = blocks.map((b, i) => ({
+    key: seq[i], path: b[seq[i]].path, shade: b[seq[i]].shade,
+  }));
 
   // Concatenate every block's chosen offset polyline. Where consecutive
   // blocks pick different sides, the connecting segment IS the crossing.
@@ -1078,6 +1111,8 @@ function drawBestRoute() {
   const counts = { left: 0, central: 0, right: 0 };
   route.forEach(r => counts[r.key]++);
   const avg = route.reduce((s, r) => s + r.shade, 0) / total;
+  let switches = 0;
+  for (let i = 1; i < route.length; i++) if (route[i].key !== route[i-1].key) switches++;
 
   const parts = [];
   if (counts.left)    parts.push(`${counts.left} left`);
@@ -1088,7 +1123,8 @@ function drawBestRoute() {
   out.innerHTML =
     `🚶 Herzl → Habima · ${fmtTime(hour)}<br>` +
     `<span style="font-weight:400; opacity:0.7; font-size:11px">` +
-    `${Math.round(avg * 100)}% avg shade · ${parts.join(' · ')}` +
+    `${Math.round(avg * 100)}% avg shade · ${parts.join(' · ')} · ` +
+    `${switches} cross${switches === 1 ? '' : 'es'}` +
     `</span>`;
 }
 
