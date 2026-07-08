@@ -203,6 +203,20 @@
   }
   .leaflet-tooltip::before { display: none !important; }
 
+  /* Pulsing shade-route line — marching-ants animation over a solid base */
+  @keyframes pulseRouteMarch { to { stroke-dashoffset: -40; } }
+  @keyframes pulseRouteGlow  {
+    0%   { opacity: 0.7; }
+    50%  { opacity: 1;   }
+    100% { opacity: 0.7; }
+  }
+  .pulse-route {
+    animation:
+      pulseRouteMarch 1.4s linear infinite,
+      pulseRouteGlow  1.8s ease-in-out infinite;
+    filter: drop-shadow(0 0 6px rgba(34,197,94,0.6));
+  }
+
   /* ─── MOBILE ─── */
   @media (max-width: 720px) {
     #topbar {
@@ -976,45 +990,106 @@ function computePathShade(path, sun) {
   return total / samples.length;
 }
 
-function showShadiestPath() {
-  if (bestPathLayer) { map.removeLayer(bestPathLayer); bestPathLayer = null; }
-  const out = document.getElementById('best-path-out');
-  const btn = document.getElementById('best-path');
+/* Three candidate walking paths, offset perpendicular from the boulevard
+   centreline. Signs: positive = east, negative = west (matches offsetPolyline). */
+const PATH_CONFIG = {
+  left:    { offset: -18, label: 'Left sidewalk'      }, // west sidewalk, along west buildings
+  central: { offset:  -4, label: 'Central boulevard'  }, // just west of median centre — the walking strip
+  right:   { offset: +18, label: 'Right sidewalk'     }, // east sidewalk, along east buildings
+};
 
+function toggleBestRoute() {
+  const btn = document.getElementById('best-path');
+  const out = document.getElementById('best-path-out');
   if (btn.classList.contains('on')) {
+    if (bestPathLayer) { map.removeLayer(bestPathLayer); bestPathLayer = null; }
     btn.classList.remove('on');
     out.style.display = 'none';
     return;
   }
+  drawBestRoute();
+}
+
+function drawBestRoute() {
+  if (bestPathLayer) { map.removeLayer(bestPathLayer); bestPathLayer = null; }
+  const btn = document.getElementById('best-path');
+  const out = document.getElementById('best-path-out');
+  btn.classList.add('on');
 
   const sun = getSun(currentDate, hour);
   if (!sun.up || sun.alt < 1) {
     out.style.display = 'block';
-    out.innerHTML = '☾ Sun is below the horizon — everywhere is shade.';
-    btn.classList.add('on');
+    out.innerHTML = '☾ Sun below the horizon — everywhere is shade.';
     return;
   }
 
-  const east = offsetPolyline(boulevardPolyline, +WALK_OFFSET_M);
-  const west = offsetPolyline(boulevardPolyline, -WALK_OFFSET_M);
-  const eastShade = computePathShade(east, sun);
-  const westShade = computePathShade(west, sun);
+  // For each block between consecutive crossings, pick the shadiest of the three paths.
+  const route = [];
+  for (let i = 0; i < CROSSINGS.length - 1; i++) {
+    const a = CROSSINGS[i], b = CROSSINGS[i + 1];
+    const aIdx = nearestPolylineIndex(boulevardPolyline, a.lat, a.lon);
+    const bIdx = nearestPolylineIndex(boulevardPolyline, b.lat, b.lon);
+    const lo = Math.min(aIdx, bIdx), hi = Math.max(aIdx, bIdx);
+    const subPoly = boulevardPolyline.slice(lo, hi + 1);
+    if (subPoly.length < 2) continue;
 
-  const better = eastShade >= westShade ? { name: 'East side', path: east, shade: eastShade } : { name: 'West side', path: west, shade: westShade };
-  const other  = eastShade >= westShade ? { name: 'West side', shade: westShade } : { name: 'East side', shade: eastShade };
+    let best = null;
+    for (const [key, cfg] of Object.entries(PATH_CONFIG)) {
+      const offset = offsetPolyline(subPoly, cfg.offset);
+      const shade = computePathShade(offset, sun);
+      if (!best || shade > best.shade) best = { key, path: offset, shade };
+    }
+    route.push(best);
+  }
+  if (!route.length) return;
 
-  bestPathLayer = L.polyline(better.path, {
-    color: '#16a34a', weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round',
-    interactive: false,
-  }).addTo(map);
+  // Concatenate every block's chosen offset polyline. Where consecutive
+  // blocks pick different sides, the connecting segment IS the crossing.
+  const composite = [];
+  for (let i = 0; i < route.length; i++) {
+    if (i === 0) composite.push(...route[i].path);
+    else composite.push(...route[i].path); // last of prev → first of current forms the jog
+  }
+
+  bestPathLayer = L.layerGroup();
+
+  // Wide dark ghost for contrast on the light basemap
+  L.polyline(composite, {
+    color: '#0a0a0a', weight: 15, opacity: 0.12,
+    lineCap: 'round', lineJoin: 'round', interactive: false,
+  }).addTo(bestPathLayer);
+
+  // Solid bright-green base
+  L.polyline(composite, {
+    color: '#16a34a', weight: 7, opacity: 0.9,
+    lineCap: 'round', lineJoin: 'round', interactive: false,
+  }).addTo(bestPathLayer);
+
+  // Marching-ants pulsing overlay
+  L.polyline(composite, {
+    color: '#bbf7d0', weight: 7, opacity: 0.95,
+    dashArray: '18 22', lineCap: 'round', interactive: false,
+    className: 'pulse-route',
+  }).addTo(bestPathLayer);
+
+  bestPathLayer.addTo(map);
+
+  const total = route.length;
+  const counts = { left: 0, central: 0, right: 0 };
+  route.forEach(r => counts[r.key]++);
+  const avg = route.reduce((s, r) => s + r.shade, 0) / total;
+
+  const parts = [];
+  if (counts.left)    parts.push(`${counts.left} left`);
+  if (counts.central) parts.push(`${counts.central} central`);
+  if (counts.right)   parts.push(`${counts.right} right`);
 
   out.style.display = 'block';
   out.innerHTML =
-    `🧭 <span style="color:#15803d">${better.name}</span> at ${fmtTime(hour)}<br>` +
-    `<span style="font-weight:400; opacity:0.7">` +
-    `${Math.round(better.shade * 100)}% shade · other side ${Math.round(other.shade * 100)}%` +
+    `🚶 Herzl → Habima · ${fmtTime(hour)}<br>` +
+    `<span style="font-weight:400; opacity:0.7; font-size:11px">` +
+    `${Math.round(avg * 100)}% avg shade · ${parts.join(' · ')}` +
     `</span>`;
-  btn.classList.add('on');
 }
 
 async function runHeatmap() {
@@ -1199,8 +1274,7 @@ document.getElementById('time-slider').addEventListener('input', (e) => {
   hour = Math.round(parseFloat(e.target.value) * 6) / 6;
   updateShadows();
   if (document.getElementById('best-path').classList.contains('on')) {
-    document.getElementById('best-path').classList.remove('on');
-    showShadiestPath();
+    drawBestRoute();
   }
 });
 document.getElementById('date-pick').addEventListener('change', (e) => {
@@ -1212,7 +1286,7 @@ document.getElementById('date-pick').addEventListener('change', (e) => {
   if (heatmapOn) runHeatmap();
 });
 document.getElementById('run-shade').addEventListener('click', runHeatmap);
-document.getElementById('best-path').addEventListener('click', showShadiestPath);
+document.getElementById('best-path').addEventListener('click', toggleBestRoute);
 
 /* ───── Export / Import edits (shared JSON, cross-device) ───── */
 function exportEdits(e) {
