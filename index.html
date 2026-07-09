@@ -403,6 +403,22 @@ let CROSSINGS = [
   { name: 'Herzl',            lat: 32.062962, lon: 34.770005 }, // south terminus (user-provided)
 ];
 
+/* Northern extension: north of Habima Square via Sderot Chen, then east
+   to Kikar Rabin, then north on Ibn Gabirol to Sderot Nordau. Coordinates
+   are best-guess approximations — user to correct after seeing on the map. */
+CROSSINGS = [
+  { name: 'Nordau × IG',           lat: 32.09548, lon: 34.78815 }, // destination
+  { name: 'IG × Basel',            lat: 32.09073, lon: 34.78645 },
+  { name: 'IG × Yehuda Hamacabi',  lat: 32.08660, lon: 34.78502 },
+  { name: 'Kikar Rabin (N)',       lat: 32.08078, lon: 34.78141 },
+  { name: 'Kikar Rabin (S)',       lat: 32.07995, lon: 34.78125 },
+  { name: 'Chen · Weizmann',       lat: 32.07853, lon: 34.78088 },
+  { name: 'Chen · Ussishkin',      lat: 32.07705, lon: 34.78053 },
+  { name: 'Chen · Frishman',       lat: 32.07542, lon: 34.78011 },
+  { name: 'Chen · Marmorek',       lat: 32.07385, lon: 34.77962 },
+  ...CROSSINGS,
+];
+
 /* OSM name patterns (Hebrew + English) for each crossing.
    Used to find the actual intersection node on the Rothschild way. */
 const CROSSING_PATTERNS = {
@@ -690,6 +706,24 @@ function initMap() {
   treeLyr      = L.layerGroup().addTo(map);
   footprintLyr = L.layerGroup().addTo(map);
   heatmapLyr   = L.layerGroup();
+
+  // Home + destination pins so the walk has endpoints visible on the map.
+  const homeIcon = L.divIcon({
+    className: '',
+    html: `<div style="font-size:22px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));">🏠</div>`,
+    iconSize: [24, 24], iconAnchor: [12, 20],
+  });
+  const flagIcon = L.divIcon({
+    className: '',
+    html: `<div style="font-size:22px; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35));">🎯</div>`,
+    iconSize: [24, 24], iconAnchor: [12, 20],
+  });
+  L.marker([HOME_LOCATION.lat, HOME_LOCATION.lon], { icon: homeIcon })
+    .bindTooltip(HOME_LOCATION.name, { direction: 'top' })
+    .addTo(map);
+  L.marker([DEST_LOCATION.lat, DEST_LOCATION.lon], { icon: flagIcon })
+    .bindTooltip(DEST_LOCATION.name, { direction: 'top' })
+    .addTo(map);
 }
 
 /* Tree canopies — visible always, independent of sun. */
@@ -712,7 +746,9 @@ function drawTreeCanopies() {
    defaults to a placeholder height until the user sets floors
    via the slider. */
 const DEFAULT_FLOORS = 4;            // 4 floors × 4 m = 16 m starting point
-const ROTHSCHILD_BBOX = '32.053,34.765,32.075,34.781';
+const ROTHSCHILD_BBOX = '32.056,34.760,32.100,34.795';
+const HOME_LOCATION = { name: 'Home · Maze × Yehuda Halevi', lat: 32.0664, lon: 34.7791 };  // approximate — user to confirm
+const DEST_LOCATION = { name: 'Nordau × Ibn Gabirol',        lat: 32.0955, lon: 34.7885 };  // approximate — user to confirm
 
 /* Fetch the real Rothschild centreline from OSM and stitch its way
    segments into a single polyline. Stored as boulevardPolyline. */
